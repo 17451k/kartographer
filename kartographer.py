@@ -16,13 +16,13 @@
 # limitations under the License.
 #
 
+import argparse
 import collections
 import json
 import os
 import re
 import sys
 import subprocess
-from optparse import OptionParser
 
 # All generated files will be stored in working directory
 WORKDIR = os.getcwd() + "/workdir"
@@ -650,32 +650,24 @@ def store_km():
 
 if __name__ == "__main__":
     # Parsing of command line options.
-    op = OptionParser()
-    op.add_option("--bc", dest="bc", metavar="PATH",
-                  help="set PATH to json with build commands")
-    op.add_option("--cif", dest="cif", metavar="PATH",
-                  help="set PATH to CIF executable")
-    (options, args) = op.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--bc', metavar='PATH', help='set PATH to json with build commands', required=True)
+    parser.add_argument('--cif', metavar='PATH', help='set PATH to CIF executable', default="cif")
+    options = parser.parse_args()
 
     # Only --bc option is required - it specifies path to json file that contains linking and compilation commands (build commands, bc) of analysed project.
     # --cif option is not required, but in this case path to cif should be located in $PATH
 
-    if not options.bc:
-        sys.exit("You should specify --bc option")
-    elif not os.path.isfile(options.bc):
+    if not os.path.isfile(options.bc):
         sys.exit("{} is not a file".format(options.bc))
 
-    if options.cif and not os.path.isfile(options.cif):
-        sys.exit("{} is not a file".format(options.cif))
-
-    if not options.cif:
-        try:
-            proc = subprocess.Popen(["cif"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            (out, err) = proc.communicate()
-        except FileNotFoundError as e:
-            if e.errno != 2:
-                raise
-            sys.exit("You should specify --cif option")
+    try:
+        proc = subprocess.Popen([options.cif], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        (out, err) = proc.communicate()
+    except FileNotFoundError as e:
+        if e.errno != 2:
+            raise
+        sys.exit("You should specify --cif option")
 
     if os.path.isdir(WORKDIR):
         sys.exit("Working directory {} already exists. Please delete or backup it and relunch the script".format(WORKDIR))
