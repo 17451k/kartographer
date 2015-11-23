@@ -246,7 +246,7 @@ def process_cc_cmd(command, src, cif):
             continue
 
         cif_opt = re.sub(r'\"', r'\\"', opt)
-        cif_args.append("\'\"{}\"\'".format(cif_opt))
+        cif_args.append("\'{}\'".format(cif_opt))
 
     cif_log = os.path.dirname(cif_out) + "/cif_log.txt"
     cif_args.extend([">", cif_log, '2>&1'])
