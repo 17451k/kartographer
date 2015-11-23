@@ -639,13 +639,13 @@ def clean_kmg_err():
     os.rename(ERR_LOG + ".temp", ERR_LOG)
 
 
-def store_km():
+def store_km(km_file):
     """
     Serializes generated model in a form of JSON.
     """
 
     print("Serializing generated model")
-    with open(WORKDIR + "/km.json", "w") as km_fh:
+    with open(km_file, "w") as km_fh:
         json.dump(KM, km_fh)
 
 if __name__ == "__main__":
@@ -653,6 +653,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--bc', metavar='PATH', help='set PATH to json with build commands', required=True)
     parser.add_argument('--cif', metavar='PATH', help='set PATH to CIF executable', default="cif")
+    parser.add_argument('--km', metavar='FILE', help='store generated KM in FILE', default=WORKDIR + "/km.json")
     options = parser.parse_args()
 
     # Only --bc option is required - it specifies path to json file that contains linking and compilation commands (build commands, bc) of analysed project.
@@ -688,5 +689,5 @@ if __name__ == "__main__":
     process_decl()
 
     build_km()
-    store_km()
+    store_km(options.km)
     print("Complete")
