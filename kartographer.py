@@ -447,8 +447,6 @@ def process_decl():
                         decl_type = "static"
 
                     for src_file in KM["functions"][decl_name]:
-                        decl_line = KM["functions"][decl_name][src_file]["decl line"]
-
                         if ((KM["functions"][decl_name][src_file]["type"] == decl_type) or
                            (KM["functions"][decl_name][src_file]["type"] == "exported")):
                             if src_file == decl_file:
@@ -456,6 +454,8 @@ def process_decl():
                             elif list(set(KM["source files"][src_file]["compiled to"]) &
                                       set(KM["source files"][decl_file]["compiled to"])):
                                 KM["functions"][decl_name][src_file]["declared in"][decl_file] = 1
+                        elif src_file == "unknown":
+                            KM["functions"][decl_name]["unknown"]["declared in"][decl_file] = 1
 
 
 def build_km():
