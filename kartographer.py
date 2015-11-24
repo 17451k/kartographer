@@ -423,7 +423,7 @@ def process_def():
                 src_file = m.group(1)
                 macro = m.group(2)
 
-                KM["macro"][macro][src_file] = 1
+                KM["macros"][macro][src_file] = 1
 
 
 def process_decl():
@@ -493,32 +493,8 @@ def build_km():
 
     reverse_km()
     process_callp()
+    refine_source_files()
     clean_kmg_err()
-
-
-def reverse_km():
-    for func in KM["functions"]:
-        for src_file in KM["functions"][func]:
-            for context_func in KM["functions"][func][src_file]["called in"]:
-                for context_file in KM["functions"][func][src_file]["called in"][context_func]:
-                    KM["functions"][context_func][context_file]["calls"][func][src_file] = KM["functions"][func][src_file]["called in"][context_func][context_file]
-
-
-def process_callp():
-    if not os.path.isfile(CALLP):
-        return
-
-    with open(CALLP, "r") as callp_fh:
-        for line in callp_fh:
-            m = re.match(r'(\S*) (\S*) (\S*) (\S*) (\S*)', line)
-            if m:
-                context_file = m.group(1)
-                context_func = m.group(2)
-                context_decl_line = m.group(3)
-                call_line = m.group(4)
-                func_ptr = m.group(5)
-
-                KM["functions"][context_func][context_file]["calls by pointer"][func_ptr][call_line] = 1
 
 
 def match_call_and_def():
@@ -609,13 +585,40 @@ def match_call_and_def():
                 break
 
 
-def kmg_error(str):
-    """
-    Prints to ERR_LOG file an error message related to work of the generator itself.
-    """
+def reverse_km():
+    for func in KM["functions"]:
+        for src_file in KM["functions"][func]:
+            for context_func in KM["functions"][func][src_file]["called in"]:
+                for context_file in KM["functions"][func][src_file]["called in"][context_func]:
+                    KM["functions"][context_func][context_file]["calls"][func][src_file] = KM["functions"][func][src_file]["called in"][context_func][context_file]
 
-    with open(ERR_LOG, "a") as err_fh:
-        err_fh.write("{}\n".format(str))
+
+def process_callp():
+    if not os.path.isfile(CALLP):
+        return
+
+    with open(CALLP, "r") as callp_fh:
+        for line in callp_fh:
+            m = re.match(r'(\S*) (\S*) (\S*) (\S*) (\S*)', line)
+            if m:
+                context_file = m.group(1)
+                context_func = m.group(2)
+                context_decl_line = m.group(3)
+                call_line = m.group(4)
+                func_ptr = m.group(5)
+
+                KM["functions"][context_func][context_file]["calls by pointer"][func_ptr][call_line] = 1
+
+
+def refine_source_files():
+    for func in KM["functions"]:
+        for src_file in KM["functions"][func]:
+            decl_line = KM["functions"][func][src_file]["decl line"]
+            KM["source files"][src_file]["defines"][func] = decl_line
+
+    for macro in KM["macros"]:
+        for src_file in KM["macros"][macro]:
+            KM["source files"][src_file]["defines"][macro] = 1
 
 
 def clean_kmg_err():
@@ -647,6 +650,15 @@ def store_km(km_file):
     print("Serializing generated model")
     with open(km_file, "w") as km_fh:
         json.dump(KM, km_fh)
+
+
+def kmg_error(str):
+    """
+    Prints to ERR_LOG file an error message related to work of the generator itself.
+    """
+
+    with open(ERR_LOG, "a") as err_fh:
+        err_fh.write("{}\n".format(str))
 
 if __name__ == "__main__":
     # Parsing of command line options.

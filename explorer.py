@@ -117,10 +117,10 @@ def KM_dump(mode, name):
                               colored(pointer, func_color),
                               colored(lines, line_color)))
     elif re.search(r'-m', mode):
-        if name not in KM["macro"]:
+        if name not in KM["macros"]:
             print("Macro {} is not found in KM".format(colored(name, func_color)))
         else:
-            for src_file in KM["macro"][name]:
+            for src_file in KM["macros"][name]:
                 print("Macro function {} is defined in {}".format(
                       colored(name, func_color),
                       colored(src_file, file_color)))
@@ -129,6 +129,13 @@ def KM_dump(mode, name):
             print("Source file {} is not found in KM".format(colored(name, file_color)))
         else:
             print("Source file {}:".format(colored(name, file_color)))
+
+            if "defines" not in KM["source files"][name]:
+                print("  doesn't define anything")
+            else:
+                print("  defines:")
+                for func_or_macro in KM["source files"][name]["defines"]:
+                    print("    {}".format(colored(func_or_macro, func_color)))
 
             if "compiled to" not in KM["source files"][name]:
                 print("  is not compiled to an object file")
