@@ -529,11 +529,6 @@ def match_call_and_def():
         # It will be a generator's fault until it supports aliases
         if not re.match(r'__mem', func):
             kmg_error("NO_POSSIBLE_DEFS: {}".format(func))
-
-    elif len(possible_src) == 1:
-        src_file = possible_src[0]
-        KM["functions"][func][src_file]["called in"][context_func][context_file][call_line] = 7
-
     else:
         found_src = [None] * 7
         for x in range(0, len(found_src)):
