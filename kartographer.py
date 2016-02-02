@@ -152,33 +152,34 @@ def process_bc(bc, cif):
     with open(bc, "r") as bc_fh:
         bc_json = json.load(bc_fh)
 
-        if "source tree root" not in bc_json:
+        if "src" not in bc_json:
             sys.exit("Can't find path to source tree root")
         elif "build commands" not in bc_json:
             sys.exit("Can't find build commands")
 
-        src = bc_json["source tree root"]
+        src = bc_json["src"]
         if not os.path.isdir(src):
             sys.exit("Specified path to source tree root is not valid")
+        src = os.path.abspath(src)
 
         number_of_commands = len(bc_json["build commands"])
         if number_of_commands == 0:
-            sys.exit("Specified json file doesn't contain valid CC or LD commands")
+            sys.exit("Specified json file doesn't contain valid gcc or ld commands")
 
         for command in bc_json["build commands"]:
             current_command += 1
 
             if "type" not in command:
                 sys.exit("Can't find 'type' field in the next build command: {}".format(command))
-            elif "in files" not in command:
-                sys.exit("Can't find 'in files' field in build command: {}".format(command))
-            elif "out file" not in command:
-                sys.exit("Can't find 'out file' field in build command: {}".format(command))
+            elif "in" not in command:
+                sys.exit("Can't find 'in' field in build command: {}".format(command))
+            elif "out" not in command:
+                sys.exit("Can't find 'out' field in build command: {}".format(command))
 
-            if command["type"] == "CC":
-                process_cc_cmd(command, src, cif)
-            elif command["type"] == "LD":
-                process_ld_cmd(command)
+            if command["type"] == "gcc":
+                process_gcc_cmd(command, src, cif)
+            elif command["type"] == "ld":
+                process_ld_cmd(command, src)
 
             sys.stdout.write("\r{} of {} commands processed".format(current_command, number_of_commands))
         sys.stdout.write("\n")
@@ -186,22 +187,30 @@ def process_bc(bc, cif):
         return src
 
 
-def process_cc_cmd(command, src, cif):
+def process_gcc_cmd(command, src, cif):
     # Temporary workaround
-    if command["in files"] == [] or command["in files"][0] == "-" or command["in files"][0] == "/dev/null" or command["in files"][0] is None or re.search(r'\.(s|S)$', command["in files"][0]) or re.search(r'\.o$', command["in files"][0]):
+    if command["in"] == [] or command["in"][0] == "-" or command["in"][0] == "/dev/null" or command["in"][0] is None or re.search(r'\.(s|S)$', command["in"][0]) or re.search(r'\.o$', command["in"][0]):
         return
-    if command["out file"] is None:
+    if command["out"] is None:
         return
 
-    cif_in = command["in files"][0]
-    cif_out = CIFDIR + "/" + command["out file"] + "/" + os.path.basename(command["out file"])
+    cif_in = command["in"][0]
+    cif_out = CIFDIR + "/" + command["out"] + "/" + os.path.basename(command["out"])
 
     if re.search(r'(/purgatory/)|(/boot/)', cif_in):
         # TODO: Investigate this issue
         return
 
-    cif_out = os.path.normpath(cif_out)
-    cif_in = os.path.normpath(cif_in)
+    if re.search(r'conftest.c', cif_in):
+        return
+
+    if "cwd" in command:
+        os.chdir(command["cwd"])
+    else:
+        os.chdir(src)
+
+    cif_out = os.path.abspath(cif_out)
+    cif_in = os.path.abspath(cif_in)
 
     if not os.path.isdir(cif_out):
         try:
@@ -210,9 +219,7 @@ def process_cc_cmd(command, src, cif):
             if e.errno != 17:
                 raise
 
-    os.chdir(src)
-
-    os.environ['CC'] = command["out file"]
+    os.environ['CC'] = command["out"]
 
     cif_args = [cif,
                 "--debug", "ALL",
@@ -230,7 +237,7 @@ def process_cc_cmd(command, src, cif):
 
     for opt in cif_opts:
         # Related with old GCC (Aspectator) bugs.
-        if opt == "-Wno-maybe-uninitialized":
+        if opt == "-Wno-maybfe-uninitialized":
             continue
         elif opt == "--param=allow-store-data-races=0":
             continue
@@ -244,6 +251,10 @@ def process_cc_cmd(command, src, cif):
             continue
         elif opt == "-m16":
             continue
+
+        m = re.search(r'-I(.*)', opt)
+        if m:
+            opt = "-I" + os.path.abspath(m.group(1))
 
         cif_opt = re.sub(r'\"', r'\\"', opt)
         cif_args.append("\'{}\'".format(cif_opt))
@@ -270,11 +281,16 @@ def dump_error_information(args, log):
         log_fh.write("\n\n")
 
 
-def process_ld_cmd(command):
-    out = os.path.normpath(command["out file"])
+def process_ld_cmd(command, src):
+    if command["out"] == None:
+        out = "unknown"
+    else:
+        out = os.path.normpath(command["out"])
+        out = os.path.relpath(out, start=src)
 
-    for in_file in command["in files"]:
+    for in_file in command["in"]:
         in_file_n = os.path.normpath(in_file)
+        in_file_n = os.path.relpath(in_file_n, start=src)
 
         KM["object files"][out]["linked from"][in_file_n] = 1
         KM["object files"][in_file_n]["linked to"][out] = 1
@@ -298,7 +314,13 @@ def normalize_cif_output(src):
                         rest = m.group(2)
 
                         path = os.path.normpath(path)
-                        path = re.sub(src + "/", "", path)
+                        if os.path.isabs(path):
+                            path = os.path.relpath(path, start=src)
+
+                        if output_file == OF:
+                            rest = os.path.normpath(rest)
+                            if os.path.isabs(rest):
+                                rest = os.path.relpath(rest, start=src)
 
                         temp_fh.write("{} {}\n".format(path, rest))
 
@@ -644,7 +666,7 @@ def store_km(km_file):
 
     print("Serializing generated model")
     with open(km_file, "w") as km_fh:
-        json.dump(KM, km_fh)
+        json.dump(KM, km_fh, sort_keys=True, indent=4)
 
 
 def kmg_error(str):
