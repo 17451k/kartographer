@@ -118,7 +118,7 @@ def gen_info_requests():
                     CALL_FILES.append(file_name)
                 elif inforequest_type == "declare_func":
                     aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$env<CC>>\n".format(OF))
-                    aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$func_name>\n".format(file_name))
+                    aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s\\n\",$path,$func_name,$decl_line>\n".format(file_name))
                     DECL_FILES.append(file_name)
 
                 aspect_fh.write("}\n\n")
@@ -398,7 +398,7 @@ def process_exe():
                 m = re.match(r'(\S*) (\S*) (\S*) (.*)', line)
                 if m:
                     src_file = m.group(1)
-                    decl_line = m.group(2)
+                    def_line = m.group(2)
                     func = m.group(3)
                     func_signature = m.group(4)
                     func_type = "ordinary"
@@ -412,7 +412,7 @@ def process_exe():
 
                     KM["functions"][func][src_file]["type"] = func_type
                     KM["functions"][func][src_file]["signature"] = func_signature
-                    KM["functions"][func][src_file]["decl line"] = decl_line
+                    KM["functions"][func][src_file]["defined on line"] = def_line
 
 
 def process_exp():
@@ -460,10 +460,11 @@ def process_decl():
 
         with open(decl_file, "r") as decl_fh:
             for line in decl_fh:
-                m = re.match(r'(\S*) (\S*)', line)
+                m = re.match(r'(\S*) (\S*) (\S*)', line)
                 if m:
                     decl_file = m.group(1)
                     decl_name = m.group(2)
+                    def_line = m.group(3)
 
                     if decl_name not in KM["functions"]:
                         continue
@@ -476,12 +477,12 @@ def process_decl():
                         if ((KM["functions"][decl_name][src_file]["type"] == decl_type) or
                            (KM["functions"][decl_name][src_file]["type"] == "exported")):
                             if src_file == decl_file:
-                                KM["functions"][decl_name][src_file]["declared in"][decl_file] = 1
+                                KM["functions"][decl_name][src_file]["declared in"][decl_file] = def_line
                             elif list(set(KM["source files"][src_file]["compiled to"]) &
                                       set(KM["source files"][decl_file]["compiled to"])):
-                                KM["functions"][decl_name][src_file]["declared in"][decl_file] = 1
+                                KM["functions"][decl_name][src_file]["declared in"][decl_file] = def_line
                         elif src_file == "unknown":
-                            KM["functions"][decl_name]["unknown"]["declared in"][decl_file] = 1
+                            KM["functions"][decl_name]["unknown"]["declared in"][decl_file] = def_line
 
 
 def build_km():
@@ -490,7 +491,7 @@ def build_km():
     global call_type
     global context_file
     global context_func
-    global context_decl_line
+    global context_def_line
     global call_line
     global func
     global call_decl_line
@@ -510,7 +511,7 @@ def build_km():
 
                     context_file = m.group(1)
                     context_func = m.group(2)
-                    context_decl_line = m.group(3)
+                    context_def_line = m.group(3)
                     call_line = m.group(4)
                     func = m.group(5)
                     call_decl_line = m.group(6)
@@ -531,7 +532,7 @@ def match_call_and_def():
         return
 
     if func not in KM["functions"]:
-        KM["functions"][func]["unknown"]["decl line"] = "unknown"
+        KM["functions"][func]["unknown"]["defined on line"] = "unknown"
         KM["functions"][func]["unknown"]["type"] = call_type
         KM["functions"][func]["unknown"]["called in"][context_func][context_file][call_line] = 1
 
@@ -548,7 +549,7 @@ def match_call_and_def():
             possible_src.append(src_file)
 
     if len(possible_src) == 0:
-        KM["functions"][func]["unknown"]["decl line"] = "unknown"
+        KM["functions"][func]["unknown"]["defined on line"] = "unknown"
         KM["functions"][func]["unknown"]["type"] = call_type
         KM["functions"][func]["unknown"]["called in"][context_func][context_file][call_line] = 0
 
@@ -565,11 +566,11 @@ def match_call_and_def():
                 found_src[1].append(src_file)
                 continue
 
-            decl_line = KM["functions"][func][src_file]["decl line"]
+            def_line = KM["functions"][func][src_file]["defined on line"]
 
             if src_file == context_file:
                 found_src[6].append(src_file)
-            elif (call_decl_line == decl_line and
+            elif (call_decl_line == def_line and
                   list(set(KM["source files"][src_file]["compiled to"]) &
                        set(KM["source files"][context_file]["compiled to"]))):
                 found_src[5].append(src_file)
@@ -599,7 +600,7 @@ def match_call_and_def():
                     KM["functions"][func][src_file]["called in"][context_func][context_file][call_line] = x
 
                     if src_file == "unknown":
-                        KM["functions"][func][src_file]["decl line"] = "unknown"
+                        KM["functions"][func][src_file]["defined on line"] = "unknown"
                         KM["functions"][func][src_file]["type"] = call_type
 
                         kmg_error("CANT_MATCH_DEF: {} call in {}".format(func, context_file))
@@ -624,7 +625,7 @@ def process_callp():
             if m:
                 context_file = m.group(1)
                 context_func = m.group(2)
-                context_decl_line = m.group(3)
+                context_def_line = m.group(3)
                 call_line = m.group(4)
                 func_ptr = m.group(5)
 
@@ -634,8 +635,8 @@ def process_callp():
 def refine_source_files():
     for func in KM["functions"]:
         for src_file in KM["functions"][func]:
-            decl_line = KM["functions"][func][src_file]["decl line"]
-            KM["source files"][src_file]["defines"][func] = decl_line
+            def_line = KM["functions"][func][src_file]["defined on line"]
+            KM["source files"][src_file]["defines"][func] = def_line
 
     for macro in KM["macros"]:
         for src_file in KM["macros"][macro]:
