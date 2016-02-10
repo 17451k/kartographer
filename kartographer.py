@@ -24,8 +24,9 @@ import re
 import sys
 import subprocess
 
+CWD = os.getcwd()
 # All generated files will be stored in working directory
-WORKDIR = os.getcwd() + "/workdir"
+WORKDIR = CWD + "/workdir"
 # Path to aspect file containing info requests to source files
 ASPECT = WORKDIR + "/info.aspect"
 # Path to file containing information about function calls by pointer
@@ -184,6 +185,8 @@ def process_bc(bc, cif):
             sys.stdout.write("\r{} of {} commands processed".format(current_command, number_of_commands))
         sys.stdout.write("\n")
 
+        os.chdir(CWD)
+
         return src
 
 
@@ -195,7 +198,6 @@ def process_gcc_cmd(command, src, cif):
         return
 
     cif_in = command["in"][0]
-    cif_out = CIFDIR + "/" + command["out"] + "/" + os.path.basename(command["out"])
 
     if re.search(r'(/purgatory/)|(/boot/)', cif_in):
         # TODO: Investigate this issue
@@ -209,8 +211,10 @@ def process_gcc_cmd(command, src, cif):
     else:
         os.chdir(src)
 
-    cif_out = os.path.abspath(cif_out)
     cif_in = os.path.abspath(cif_in)
+
+    cif_out = os.path.join(os.path.abspath(command["out"]), os.path.basename(command["out"]))
+    cif_out = os.path.normpath(os.path.join(CIFDIR, os.path.relpath(cif_out, start=src)))
 
     if not os.path.isdir(cif_out):
         try:
@@ -267,7 +271,7 @@ def process_gcc_cmd(command, src, cif):
     if os.system(cif_args_str):
         dump_error_information(cif_args_str, cif_log)
 
-    os.chdir(WORKDIR)
+    os.chdir(src)
 
 
 def dump_error_information(args, log):
