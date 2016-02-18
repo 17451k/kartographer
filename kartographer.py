@@ -31,6 +31,8 @@ WORKDIR = CWD + "/workdir"
 ASPECT = WORKDIR + "/info.aspect"
 # Path to file containing information about function calls by pointer
 CALLP = WORKDIR + "/callp.txt"
+# Path to file containing information about function use by pointer
+USE_FUNC = WORKDIR + "/use_func.txt"
 # Linux only: Path to file containing information about exported functions
 EXPORTED = WORKDIR + "/exported.txt"
 # Path to file containing information about macro functions
@@ -81,7 +83,7 @@ def gen_info_requests():
             - number of the line with context function definition ($func_context_decl_line)
             - number of the line with the call ($call_line)
             - name of the function pointer ($func_ptr_name)
-        - for each macro function:
+        - for each macro and macro function:
             - path to the file containing the macro ($path)
             - name of the macro ($macro_name)
 
@@ -114,7 +116,7 @@ def gen_info_requests():
                     aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s %s\\n\",$path,$decl_line,$func_name,$signature>\n".format(file_name))
                     EXE_FILES.append(file_name)
                 elif inforequest_type == "call":
-                    aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s %s %s %s\\n\",$func_context_path,$func_context_name,$func_context_decl_line,$call_line,$func_name,$decl_line>\n".format(file_name))
+                    aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s %s %s\\n\",$func_context_path,$func_context_name,$call_line,$func_name,$decl_line>\n".format(file_name))
                     CALL_FILES.append(file_name)
                 elif inforequest_type == "declare_func":
                     aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$env<CC>>\n".format(OF))
@@ -125,11 +127,19 @@ def gen_info_requests():
                 CIF_OUTPUT.append(file_name)
 
         aspect_fh.write("info: callp($ $(..)) {\n")
-        aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s %s %s\\n\",$func_context_path,$func_context_name,$func_context_decl_line,$call_line,$func_ptr_name>\n".format(CALLP))
+        aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s %s\\n\",$func_context_path,$func_context_name,$call_line,$func_ptr_name>\n".format(CALLP))
+        aspect_fh.write("}\n\n")
+
+        aspect_fh.write("info: use_func($ $(..)) {\n")
+        aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$func_name>\n".format(USE_FUNC))
         aspect_fh.write("}\n\n")
 
         aspect_fh.write("info: expand(__EXPORT_SYMBOL(sym, sec)) {\n")
         aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$arg_val1>\n".format(EXPORTED))
+        aspect_fh.write("}\n\n")
+
+        aspect_fh.write("info: define($) {\n")
+        aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$macro_name>\n".format(DEFINE))
         aspect_fh.write("}\n\n")
 
         for args in ["arg1", "arg1, arg2", "arg1, arg2, arg3"]:
@@ -140,6 +150,7 @@ def gen_info_requests():
         CIF_OUTPUT.append(EXPORTED)
         CIF_OUTPUT.append(DEFINE)
         CIF_OUTPUT.append(CALLP)
+        CIF_OUTPUT.append(USE_FUNC)
         CIF_OUTPUT.append(OF)
 
 
@@ -491,7 +502,6 @@ def build_km():
     global call_type
     global context_file
     global context_func
-    global context_def_line
     global call_line
     global func
     global call_decl_line
@@ -506,20 +516,20 @@ def build_km():
                 call_type = "static"
 
             for line in call_fh:
-                m = re.match(r'(\S*) (\S*) (\S*) (\S*) (\S*) (\S*)', line)
+                m = re.match(r'(\S*) (\S*) (\S*) (\S*) (\S*)', line)
                 if m:
 
                     context_file = m.group(1)
                     context_func = m.group(2)
-                    context_def_line = m.group(3)
-                    call_line = m.group(4)
-                    func = m.group(5)
-                    call_decl_line = m.group(6)
+                    call_line = m.group(3)
+                    func = m.group(4)
+                    call_decl_line = m.group(5)
 
                     match_call_and_def()
 
-    reverse_km()
     process_callp()
+    process_use_func()
+    reverse_km()
     refine_source_files()
     clean_kmg_err()
 
@@ -534,7 +544,7 @@ def match_call_and_def():
     if func not in KM["functions"]:
         KM["functions"][func]["unknown"]["defined on line"] = "unknown"
         KM["functions"][func]["unknown"]["type"] = call_type
-        KM["functions"][func]["unknown"]["called in"][context_func][context_file][call_line] = 1
+        KM["functions"][func]["unknown"]["called in"][context_func][context_file][call_line] = 0
 
         kmg_error("NO_DEFS_IN_KM: {}".format(func))
 
@@ -569,25 +579,25 @@ def match_call_and_def():
             def_line = KM["functions"][func][src_file]["defined on line"]
 
             if src_file == context_file:
-                found_src[6].append(src_file)
+                found_src[5].append(src_file)
             elif (call_decl_line == def_line and
                   list(set(KM["source files"][src_file]["compiled to"]) &
                        set(KM["source files"][context_file]["compiled to"]))):
-                found_src[5].append(src_file)
+                found_src[4].append(src_file)
             elif (list(set(KM["source files"][src_file]["compiled to"]) &
                        set(KM["source files"][context_file]["compiled to"]))):
-                found_src[4].append(src_file)
+                found_src[3].append(src_file)
             elif (call_type == "ordinary" and
                   ("used in" in KM["source files"][src_file] and
                    "used in" in KM["source files"][context_file] and
                    list(set(KM["source files"][src_file]["used in"]) &
                         set(KM["source files"][context_file]["used in"])))):
-                found_src[3].append(src_file)
+                found_src[2].append(src_file)
             elif call_type == "ordinary":
                 for decl_file in KM["functions"][func][src_file]["declared in"]:
                     if list(set(KM["source files"][decl_file]["compiled to"]) &
                             set(KM["source files"][context_file]["compiled to"])):
-                        found_src[2].append(src_file)
+                        found_src[1].append(src_file)
                         break
 
         found_src[0].append("unknown")
@@ -607,29 +617,86 @@ def match_call_and_def():
                 break
 
 
-def reverse_km():
-    for func in KM["functions"]:
-        for src_file in KM["functions"][func]:
-            for context_func in KM["functions"][func][src_file]["called in"]:
-                for context_file in KM["functions"][func][src_file]["called in"][context_func]:
-                    KM["functions"][context_func][context_file]["calls"][func][src_file] = KM["functions"][func][src_file]["called in"][context_func][context_file]
-
-
 def process_callp():
     if not os.path.isfile(CALLP):
         return
 
     with open(CALLP, "r") as callp_fh:
         for line in callp_fh:
-            m = re.match(r'(\S*) (\S*) (\S*) (\S*) (\S*)', line)
+            m = re.match(r'(\S*) (\S*) (\S*) (\S*)', line)
             if m:
                 context_file = m.group(1)
                 context_func = m.group(2)
-                context_def_line = m.group(3)
-                call_line = m.group(4)
-                func_ptr = m.group(5)
+                call_line = m.group(3)
+                func_ptr = m.group(4)
 
                 KM["functions"][context_func][context_file]["calls by pointer"][func_ptr][call_line] = 1
+
+
+def process_use_func():
+    global file
+    global func
+
+    if not os.path.isfile(USE_FUNC):
+        return
+
+    with open(USE_FUNC, "r") as use_func_fh:
+        for line in use_func_fh:
+            m = re.match(r'(\S*) (\S*)', line)
+            if m:
+                file = m.group(1)
+                func = m.group(2)
+
+                match_use_and_def()
+
+
+def match_use_and_def():
+    if func not in KM["functions"]:
+        kmg_error("USE_UNKNOW_FUNCTION: {}".format(func))
+
+        return
+
+    possible_src = []
+    for src_file in KM["functions"][func]:
+        if src_file == "unknown":
+            continue
+        possible_src.append(src_file)
+
+    if len(possible_src) == 0:
+        kmg_error("NO_POSSIBLE_DEFS_FOR_USE: {}".format(func))
+    else:
+        found_src = [None] * 3
+        for x in range(0, len(found_src)):
+            found_src[x] = []
+
+        for src_file in possible_src:
+
+            if src_file == file:
+                found_src[2].append(src_file)
+            elif (list(set(KM["source files"][src_file]["compiled to"]) &
+                       set(KM["source files"][file]["compiled to"]))):
+                found_src[1].append(src_file)
+
+        found_src[0].append("unknown")
+
+        for x in range(len(found_src) - 1, -1, -1):
+            if found_src[x] != []:
+                if len(found_src[x]) > 1:
+                    kmg_error("MULTIPLE_MATCHES_FOR_USE: {} call in {}".format(func, file))
+                for src_file in found_src[x]:
+                    KM["functions"][func][src_file]["used in file"][file] = x
+
+                    if src_file == "unknown":
+                        kmg_error("CANT_MATCH_DEF_FOR_USE: {} call in {}".format(func, file))
+                break
+
+
+def reverse_km():
+    for func in KM["functions"]:
+        for src_file in KM["functions"][func]:
+            for context_func in KM["functions"][func][src_file]["called in"]:
+                for context_file in KM["functions"][func][src_file]["called in"][context_func]:
+                    KM["functions"][context_func][context_file]["calls"][func][src_file] = KM["functions"][func][src_file]["called in"][context_func][context_file]
 
 
 def refine_source_files():
