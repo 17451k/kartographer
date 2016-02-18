@@ -85,6 +85,7 @@ def gen_info_requests():
             - name of the function pointer ($func_ptr_name)
         - for each macro and macro function:
             - path to the file containing the macro ($path)
+            - number of the line with macro definition ($line)
             - name of the macro ($macro_name)
 
     For the Linux kernel it will additionally do the following:
@@ -139,12 +140,12 @@ def gen_info_requests():
         aspect_fh.write("}\n\n")
 
         aspect_fh.write("info: define($) {\n")
-        aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$macro_name>\n".format(DEFINE))
+        aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s\\n\",$path,$line,$macro_name>\n".format(DEFINE))
         aspect_fh.write("}\n\n")
 
         for args in ["arg1", "arg1, arg2", "arg1, arg2, arg3"]:
             aspect_fh.write("info: define($({})) {{\n".format(args))
-            aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$macro_name>\n".format(DEFINE))
+            aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s\\n\",$path,$line,$macro_name>\n".format(DEFINE))
             aspect_fh.write("}\n\n")
 
         CIF_OUTPUT.append(EXPORTED)
@@ -455,12 +456,13 @@ def process_def():
 
     with open(DEFINE, "r") as def_fh:
         for line in def_fh:
-            m = re.match(r'(\S*) (\S*)', line)
+            m = re.match(r'(\S*) (\S*) (\S*)', line)
             if m:
                 src_file = m.group(1)
-                macro = m.group(2)
+                line = m.group(2)
+                macro = m.group(3)
 
-                KM["macros"][macro][src_file] = 1
+                KM["macros"][macro][src_file] = line
 
 
 def process_decl():
