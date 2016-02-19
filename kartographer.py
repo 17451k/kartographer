@@ -132,7 +132,7 @@ def gen_info_requests():
         aspect_fh.write("}\n\n")
 
         aspect_fh.write("info: use_func($ $(..)) {\n")
-        aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$func_name>\n".format(USE_FUNC))
+        aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s %s\\n\",$path,$use_line,$func_context_name,$func_name>\n".format(USE_FUNC))
         aspect_fh.write("}\n\n")
 
         aspect_fh.write("info: expand(__EXPORT_SYMBOL(sym, sec)) {\n")
@@ -638,16 +638,20 @@ def process_callp():
 def process_use_func():
     global file
     global func
+    global context_func
+    global line
 
     if not os.path.isfile(USE_FUNC):
         return
 
     with open(USE_FUNC, "r") as use_func_fh:
         for line in use_func_fh:
-            m = re.match(r'(\S*) (\S*)', line)
+            m = re.match(r'(\S*) (\S*) (\S*) (\S*)', line)
             if m:
                 file = m.group(1)
-                func = m.group(2)
+                line = m.group(2)
+                context_func = m.group(3)
+                func = m.group(4)
 
                 match_use_and_def()
 
@@ -667,16 +671,21 @@ def match_use_and_def():
     if len(possible_src) == 0:
         kmg_error("NO_POSSIBLE_DEFS_FOR_USE: {}".format(func))
     else:
-        found_src = [None] * 3
+        found_src = [None] * 4
         for x in range(0, len(found_src)):
             found_src[x] = []
 
         for src_file in possible_src:
 
             if src_file == file:
-                found_src[2].append(src_file)
+                found_src[3].append(src_file)
             elif (list(set(KM["source files"][src_file]["compiled to"]) &
                        set(KM["source files"][file]["compiled to"]))):
+                found_src[2].append(src_file)
+            elif ("used in" in KM["source files"][src_file] and
+                    "used in" in KM["source files"][file] and
+                    list(set(KM["source files"][src_file]["used in"]) &
+                         set(KM["source files"][file]["used in"]))):
                 found_src[1].append(src_file)
 
         found_src[0].append("unknown")
@@ -686,7 +695,10 @@ def match_use_and_def():
                 if len(found_src[x]) > 1:
                     kmg_error("MULTIPLE_MATCHES_FOR_USE: {} call in {}".format(func, file))
                 for src_file in found_src[x]:
-                    KM["functions"][func][src_file]["used in file"][file] = x
+                    if context_func == "NULL":
+                        KM["functions"][func][src_file]["used in file"][file][line] = x
+                    else:
+                        KM["functions"][func][src_file]["used in func"][context_func][file][line] = x
 
                     if src_file == "unknown":
                         kmg_error("CANT_MATCH_DEF_FOR_USE: {} call in {}".format(func, file))
@@ -699,6 +711,10 @@ def reverse_km():
             for context_func in KM["functions"][func][src_file]["called in"]:
                 for context_file in KM["functions"][func][src_file]["called in"][context_func]:
                     KM["functions"][context_func][context_file]["calls"][func][src_file] = KM["functions"][func][src_file]["called in"][context_func][context_file]
+            if "used in func" in KM["functions"][func][src_file]:
+                for context_func in KM["functions"][func][src_file]["used in func"]:
+                    for context_file in KM["functions"][func][src_file]["used in func"][context_func]:
+                        KM["functions"][context_func][context_file]["uses"][func][src_file] = KM["functions"][func][src_file]["used in func"][context_func][context_file]
 
 
 def refine_source_files():
