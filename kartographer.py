@@ -33,8 +33,8 @@ ASPECT = WORKDIR + "/info.aspect"
 CALLP = WORKDIR + "/callp.txt"
 # Path to file containing information about function use by pointer
 USE_FUNC = WORKDIR + "/use_func.txt"
-# Linux only: Path to file containing information about exported functions
-EXPORTED = WORKDIR + "/exported.txt"
+USE_VAR = WORKDIR + "/use_var.txt"
+INIT_GLOBAL = WORKDIR + "/init_global.txt"
 # Path to file containing information about macro functions
 DEFINE = WORKDIR + "/define.txt"
 # Path to CIF working directory
@@ -45,6 +45,11 @@ OF = WORKDIR + "/object_files.txt"
 CIF_ERR_LOG = WORKDIR + "/cif_err_log.txt"
 # Path to file containing Kartograpger error log
 ERR_LOG = WORKDIR + "/err_log.txt"
+
+# Linux only: Path to file containing information about exported functions
+EXPORTED = WORKDIR + "/exported.txt"
+INIT = WORKDIR + "/init.txt"
+EXIT = WORKDIR + "/exit.txt"
 
 EXE_FILES = []
 CALL_FILES = []
@@ -132,11 +137,29 @@ def gen_info_requests():
         aspect_fh.write("}\n\n")
 
         aspect_fh.write("info: use_func($ $(..)) {\n")
-        aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s %s\\n\",$path,$use_line,$func_context_name,$func_name>\n".format(USE_FUNC))
+        aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s %s\\n\",$path,$func_context_name,$func_name,$use_line>\n".format(USE_FUNC))
+        aspect_fh.write("}\n\n")
+
+        aspect_fh.write("info: use_var($ $) {\n")
+        aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s %s\\n\",$path,$func_context_name,$var_name,$use_line>\n".format(USE_VAR))
+        aspect_fh.write("}\n\n")
+
+        aspect_fh.write("info: init_global($ $) {\n")
+        aspect_fh.write("  $fprintf<\"{}\",\"%s %s\",$path,$var_name>\n".format(INIT_GLOBAL))
+        aspect_fh.write("  $fprintf_var_init_values<\"{}\">\n".format(INIT_GLOBAL))
+        aspect_fh.write("  $fprintf<\"{}\",\"\\n\">\n".format(INIT_GLOBAL))
         aspect_fh.write("}\n\n")
 
         aspect_fh.write("info: expand(__EXPORT_SYMBOL(sym, sec)) {\n")
         aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$arg_val1>\n".format(EXPORTED))
+        aspect_fh.write("}\n\n")
+
+        aspect_fh.write("info: expand(module_init(x)) {\n")
+        aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$arg_val1>\n".format(INIT))
+        aspect_fh.write("}\n\n")
+
+        aspect_fh.write("info: expand(module_exit(x)) {\n")
+        aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$arg_val1>\n".format(EXIT))
         aspect_fh.write("}\n\n")
 
         aspect_fh.write("info: define($) {\n")
@@ -149,9 +172,13 @@ def gen_info_requests():
             aspect_fh.write("}\n\n")
 
         CIF_OUTPUT.append(EXPORTED)
+        CIF_OUTPUT.append(INIT)
+        CIF_OUTPUT.append(EXIT)
         CIF_OUTPUT.append(DEFINE)
         CIF_OUTPUT.append(CALLP)
         CIF_OUTPUT.append(USE_FUNC)
+        CIF_OUTPUT.append(USE_VAR)
+        CIF_OUTPUT.append(INIT_GLOBAL)
         CIF_OUTPUT.append(OF)
 
 
@@ -282,6 +309,11 @@ def process_gcc_cmd(command, src, cif):
 
     if os.system(cif_args_str):
         dump_error_information(cif_args_str, cif_log)
+
+    rel_in = os.path.relpath(command["in"][0], start=src)
+    rel_out = os.path.relpath(command["out"], start=src)
+    KM["source files"][rel_in]["compiled to"][rel_out] = 1
+    KM["object files"][rel_out]["compiled from"][rel_in] = 1
 
     os.chdir(src)
 
@@ -498,6 +530,36 @@ def process_decl():
                             KM["functions"][decl_name]["unknown"]["declared in"][decl_file] = def_line
 
 
+def process_init():
+    if not os.path.isfile(INIT):
+        return
+    print("Processing init functions")
+
+    with open(INIT, "r") as init_fh:
+        for line in init_fh:
+            m = re.match(r'(\S*) (\S*)', line)
+            if m:
+                file = m.group(1)
+                func = m.group(2)
+
+                KM["functions"][func][file]["init"] = True
+
+
+def process_exit():
+    if not os.path.isfile(EXIT):
+        return
+    print("Processing exit functions")
+
+    with open(EXIT, "r") as exit_fh:
+        for line in exit_fh:
+            m = re.match(r'(\S*) (\S*)', line)
+            if m:
+                file = m.group(1)
+                func = m.group(2)
+
+                KM["functions"][func][file]["exit"] = True
+
+
 def build_km():
     print("Building KM")
 
@@ -530,6 +592,8 @@ def build_km():
                     match_call_and_def()
 
     process_callp()
+    process_init_global()
+    process_use_var()
     process_use_func()
     reverse_km()
     refine_source_files()
@@ -635,6 +699,91 @@ def process_callp():
                 KM["functions"][context_func][context_file]["calls by pointer"][func_ptr][call_line] = 1
 
 
+def process_init_global():
+    if not os.path.isfile(INIT_GLOBAL):
+        return
+
+    variables = nested_dict()
+
+    with open(INIT_GLOBAL, "r") as init_fh:
+        for line in init_fh:
+            m = re.match(r'^(\S+) (\w+)\|\|(.*)', line)
+            if m:
+                file = m.group(1)
+                var_name = m.group(2)
+                rest = m.group(3)
+
+                rest = re.sub(r'& ', '', rest)
+                var_values_and_types = rest.split('||')
+
+                for value_and_type in var_values_and_types:
+                    m = re.match(r'(.*):(\d)', value_and_type)
+                    if m:
+                        value = m.group(1)
+                        valueType = m.group(2)
+                        variables[var_name][file]["values"][value] = valueType
+
+    global viewed
+
+    for var_name in variables:
+        for file in variables[var_name]:
+            viewed = nested_dict()
+            match_var_and_value(variables, var_name, file, var_name, file)
+
+
+def match_var_and_value(variables, var_name, file, origvar_name, original_file):
+    if var_name in viewed and file in viewed[var_name]:
+        return
+
+    viewed[var_name][file] = 1
+
+    for value in variables[var_name][file]["values"]:
+        if variables[var_name][file]["values"][value] == "1":
+            KM["variables"][origvar_name][original_file]["values"][value] = 1
+        elif value in variables:
+            for src_file in variables[value]:
+                if src_file == file:
+                    match_var_and_value(variables, value, src_file, origvar_name, original_file)
+                elif (list(set(KM["source files"][src_file]["compiled to"]) &
+                           set(KM["source files"][file]["compiled to"]))):
+                    match_var_and_value(variables, value, src_file, origvar_name, original_file)
+
+
+def process_use_var():
+    if not os.path.isfile(USE_VAR):
+        return
+
+    global file
+    global func
+    global context_func
+    global line
+
+    with open(USE_VAR, "r") as use_var_fh:
+        for file_line in use_var_fh:
+            m = re.match(r'(\S*) (\S*) (\S*) (\S*)', file_line)
+            if m:
+                file = m.group(1)
+                context_func = m.group(2)
+                var_name = m.group(3)
+                line = m.group(4)
+
+                if var_name in KM["variables"]:
+                    for src_file in KM["variables"][var_name]:
+                        if src_file == file:
+                            for func in KM["variables"][var_name][src_file]["values"]:
+                                match_use_and_def()
+                        elif (list(set(KM["source files"][src_file]["compiled to"]) &
+                                   set(KM["source files"][file]["compiled to"]))):
+                            for func in KM["variables"][var_name][src_file]["values"]:
+                                match_use_and_def()
+                        elif ("used in" in KM["source files"][src_file] and
+                                "used in" in KM["source files"][file] and
+                                list(set(KM["source files"][src_file]["used in"]) &
+                                     set(KM["source files"][file]["used in"]))):
+                            for func in KM["variables"][var_name][src_file]["values"]:
+                                match_use_and_def()
+
+
 def process_use_func():
     global file
     global func
@@ -645,12 +794,12 @@ def process_use_func():
         return
 
     with open(USE_FUNC, "r") as use_func_fh:
-        for line in use_func_fh:
-            m = re.match(r'(\S*) (\S*) (\S*) (\S*)', line)
+        for file_line in use_func_fh:
+            m = re.match(r'(\S*) (\S*) (\S*) (\S*)', file_line)
             if m:
                 file = m.group(1)
-                line = m.group(2)
-                context_func = m.group(3)
+                context_func = m.group(2)
+                line = m.group(3)
                 func = m.group(4)
 
                 match_use_and_def()
@@ -805,6 +954,8 @@ if __name__ == "__main__":
     process_exe()
     process_exp()
     process_def()
+    process_init()
+    process_exit()
     process_decl()
 
     build_km()
