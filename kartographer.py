@@ -21,40 +21,30 @@ import collections
 import json
 import os
 import re
-import sys
 import subprocess
+import sys
 
-CWD = os.getcwd()
-# All generated files will be stored in working directory
-WORKDIR = CWD + "/workdir"
-# Path to aspect file containing info requests to source files
-ASPECT = WORKDIR + "/info.aspect"
-# Path to file containing information about function calls by pointer
-CALLP = WORKDIR + "/callp.txt"
-# Path to file containing information about function use by pointer
-USE_FUNC = WORKDIR + "/use_func.txt"
-USE_VAR = WORKDIR + "/use_var.txt"
-INIT_GLOBAL = WORKDIR + "/init_global.txt"
-# Path to file containing information about macro functions
-DEFINE = WORKDIR + "/define.txt"
-# Path to CIF working directory
-CIFDIR = WORKDIR + "/cif/"
-# Path to file containing information from compilation of .c files
-OF = WORKDIR + "/object_files.txt"
-# Path to file containing CIF error log
-CIF_ERR_LOG = WORKDIR + "/cif_err_log.txt"
-# Path to file containing Kartograpger error log
-ERR_LOG = WORKDIR + "/err_log.txt"
+WD = os.getcwd() + "/workdir"  # A place for all generated files
 
-# Linux only: Path to file containing information about exported functions
-EXPORTED = WORKDIR + "/exported.txt"
-INIT = WORKDIR + "/init.txt"
-EXIT = WORKDIR + "/exit.txt"
+# The following files will contain information about source code and will be created by CIF
+EXECUTION = WD + "/execution.txt"  # Info about function definitions
+CALL = WD + "/call.txt"  # Info about function calls
+DECL = WD + "/declare_func.txt"  # Info about function declarations
+CALLP = WD + "/callp.txt"  # Info about function calls via a function pointer
+USE_FUNC = WD + "/use_func.txt"  # Info about using function names in pointers (in function context only)
+USE_VAR = WD + "/use_var.txt"  # Info about using global variables in function context
+INIT_GLOBAL = WD + "/init_global.txt"  # Info about init values of global variables
+DEFINE = WD + "/define.txt"  # Info about macro functions
+OF = WD + "/object_files.txt"  # Info about from compilation of .c files
+EXPORTED = WD + "/exported.txt"  # Info about exported functions (Linux kernel only)
+INIT = WD + "/init.txt"  # Info about module_init functions (Linux kernel only)
+EXIT = WD + "/exit.txt"  # Info about module_exit functions (Linux kernel only)
 
-EXE_FILES = []
-CALL_FILES = []
-DECL_FILES = []
-CIF_OUTPUT = []
+FILES = [EXECUTION, CALL, DECL, CALLP, USE_FUNC, USE_VAR, INIT_GLOBAL, DEFINE, OF, EXPORTED, INIT, EXIT]
+
+# Log files
+CIF_ERR_LOG = WD + "/cif_err.log"  # Path to file containing CIF error log
+ERR_LOG = WD + "/err.log"  # Path to file containing Kartograpger error log
 
 
 def nested_dict():
@@ -67,147 +57,154 @@ def gen_info_requests():
     Generates special aspect file with information reqests.
 
     This file is used by CIF to obtain the following information:
-        - for each function call:
-            - path to the file containing the call ($func_context_path)
-            - name of the function containing the call (context function, $func_context_name)
-            - number of the line with context function definition ($func_context_decl_line)
-            - number of the line with the call ($call_line)
-            - name of the function ($func_name)
-            - number of the line with the declaration of the called function ($decl_line)
-        - for each function definition:
-            - path to the file containing the definition ($path)
-            - number of the line with the definition ($decl_line)
-            - name of the function ($func_name)
-            - signature of the function ($signature)
+        - for each function definition (info: execution):
+            - path of the current source file ($path)
+            - function name ($func_name)
+            - definition line number ($decl_line)
+        - for each function declaration (info: declare_func):
+            - path of the current source file ($path)
+            - function name ($func_name)
+            - declaration line number ($decl_line)
+        - for each function call (info: call):
+            - path of the current source file ($func_context_path)
+            - name of the function that contains the call (context function, $func_context_name)
+            - function name ($func_name)
+            - call line number ($call_line)
+            - called function declaration line number ($decl_line)
         - for each compilation command:
-            - name of the object file ($env<CC>)
+            - name of the object file ($env<OBJ>)
             - list of the source files (.c and .h files) that will be compiled ($path)
-        - for each function call by pointer:
-            - path to the file containing the call ($func_context_path)
-            - name of the function containing the call (context function, $func_context_name)
-            - number of the line with context function definition ($func_context_decl_line)
-            - number of the line with the call ($call_line)
-            - name of the function pointer ($func_ptr_name)
+        - for each function call by pointer (info: callp):
+            - path of the current source file ($func_context_path)
+            - name of the function that contains the call(context function, $func_context_name)
+            - function pointer name ($func_ptr_name)
+            - call line number ($call_line)
+        - for each function name use in function pointers (info: use_func):
+            - path of the current source file ($func_context_path)
+            - name of the function that uses the function name ($func_context_name)
+            - function name ($func_name)
+            - use line number ($use_line)
+        - for each global variable use in function context (info: use_var):
+            - path of the current source file ($func_context_path)
+            - name of the function that uses the global variable ($func_context_name)
+            - variable name ($var_name)
+            - use line number ($use_line)
+        - for each global variable initialization (info: init_global):
+            - path of the current source file ($path)
+            - variable name ($var_name)
+            - preformatted list of init values ($fprintf_var_init_values)
         - for each macro and macro function:
-            - path to the file containing the macro ($path)
+            - path of the current source file ($path)
             - number of the line with macro definition ($line)
             - name of the macro ($macro_name)
 
     For the Linux kernel it will additionally do the following:
         - remove likely(x) and unlikely(x) macro functions from sources
         - retreave the list of exported functions
+        - retreave the list of module_init functions
+        - retreave the list of module_exit functions
 
     """
 
     print("Generating aspect file with info requests")
 
-    inforequest_types = ["execution", "call", "declare_func"]
-    function_types = ["static", ""]
+    # Path to aspect file containing info requests to source files
+    aspect = WD + "/info.aspect"
 
-    with open(ASPECT, "w") as aspect_fh:
-        aspect_fh.write("around: define(likely(x)) { (x) }\n\n")
-        aspect_fh.write("around: define(unlikely(x)) { (x) }\n\n")
+    with open(aspect, "w") as asp_fh:
+        asp_fh.write("around: define(likely(x)) { (x) }\n\n")  # Workaround for CIF
+        asp_fh.write("around: define(unlikely(x)) { (x) }\n\n")
 
-        for inforequest_type in inforequest_types:
-            for function_type in function_types:
-                if function_type == "":
-                    file_name = "{}/{}.txt".format(WORKDIR, inforequest_type)
-                else:
-                    file_name = "{}/{}-{}.txt".format(WORKDIR, function_type, inforequest_type)
+        asp_fh.write("info: execution(static $ $(..)) {\n")
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$env<OBJ>>\n".format(OF))
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s %s static\\n\",$path,$func_name,$decl_line>\n".format(EXECUTION))
+        asp_fh.write("}\n\n")
 
-                aspect_fh.write("info: {}({} $ $(..)) {{\n".format(inforequest_type, function_type))
+        asp_fh.write("info: execution($ $(..)) {\n")
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$env<OBJ>>\n".format(OF))
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s %s global\\n\",$path,$func_name,$decl_line>\n".format(EXECUTION))
+        asp_fh.write("}\n\n")
 
-                if inforequest_type == "execution":
-                    aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$env<CC>>\n".format(OF))
-                    aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s %s\\n\",$path,$decl_line,$func_name,$signature>\n".format(file_name))
-                    EXE_FILES.append(file_name)
-                elif inforequest_type == "call":
-                    aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s %s %s\\n\",$func_context_path,$func_context_name,$call_line,$func_name,$decl_line>\n".format(file_name))
-                    CALL_FILES.append(file_name)
-                elif inforequest_type == "declare_func":
-                    aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$env<CC>>\n".format(OF))
-                    aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s\\n\",$path,$func_name,$decl_line>\n".format(file_name))
-                    DECL_FILES.append(file_name)
+        asp_fh.write("info: declare_func($ $(..)) {\n")
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$env<OBJ>>\n".format(OF))
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s %s\\n\",$path,$func_name,$decl_line>\n".format(DECL))
+        asp_fh.write("}\n\n")
 
-                aspect_fh.write("}\n\n")
-                CIF_OUTPUT.append(file_name)
+        asp_fh.write("info: call(static $ $(..)) {\n")
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s %s %s static\\n\",$func_context_path,$func_context_name,$func_name,$call_line>\n".format(CALL))
+        asp_fh.write("}\n\n")
 
-        aspect_fh.write("info: callp($ $(..)) {\n")
-        aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s %s\\n\",$func_context_path,$func_context_name,$call_line,$func_ptr_name>\n".format(CALLP))
-        aspect_fh.write("}\n\n")
+        asp_fh.write("info: call($ $(..)) {\n")
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s %s %s global\\n\",$func_context_path,$func_context_name,$func_name,$call_line>\n".format(CALL))
+        asp_fh.write("}\n\n")
 
-        aspect_fh.write("info: use_func($ $(..)) {\n")
-        aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s %s\\n\",$path,$func_context_name,$func_name,$use_line>\n".format(USE_FUNC))
-        aspect_fh.write("}\n\n")
+        asp_fh.write("info: callp($ $(..)) {\n")
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s %s %s\\n\",$func_context_path,$func_context_name,$func_ptr_name,$call_line>\n".format(CALLP))
+        asp_fh.write("}\n\n")
 
-        aspect_fh.write("info: use_var($ $) {\n")
-        aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s %s\\n\",$path,$func_context_name,$var_name,$use_line>\n".format(USE_VAR))
-        aspect_fh.write("}\n\n")
+        asp_fh.write("info: use_func($ $(..)) {\n")
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s %s %s\\n\",$func_context_path,$func_context_name,$func_name,$use_line>\n".format(USE_FUNC))
+        asp_fh.write("}\n\n")
 
-        aspect_fh.write("info: init_global($ $) {\n")
-        aspect_fh.write("  $fprintf<\"{}\",\"%s %s\",$path,$var_name>\n".format(INIT_GLOBAL))
-        aspect_fh.write("  $fprintf_var_init_values<\"{}\">\n".format(INIT_GLOBAL))
-        aspect_fh.write("  $fprintf<\"{}\",\"\\n\">\n".format(INIT_GLOBAL))
-        aspect_fh.write("}\n\n")
+        asp_fh.write("info: use_var($ $) {\n")
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s %s %s\\n\",$func_context_path,$func_context_name,$var_name,$use_line>\n".format(USE_VAR))
+        asp_fh.write("}\n\n")
 
-        aspect_fh.write("info: expand(__EXPORT_SYMBOL(sym, sec)) {\n")
-        aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$arg_val1>\n".format(EXPORTED))
-        aspect_fh.write("}\n\n")
+        asp_fh.write("info: init_global($ $) {\n")
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$env<OBJ>>\n".format(OF))
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s\",$path,$var_name>\n".format(INIT_GLOBAL))
+        asp_fh.write("  $fprintf_var_init_values<\"{}\">\n".format(INIT_GLOBAL))
+        asp_fh.write("  $fprintf<\"{}\",\"\\n\">\n".format(INIT_GLOBAL))
+        asp_fh.write("}\n\n")
 
-        aspect_fh.write("info: expand(module_init(x)) {\n")
-        aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$arg_val1>\n".format(INIT))
-        aspect_fh.write("}\n\n")
+        asp_fh.write("info: expand(__EXPORT_SYMBOL(sym, sec)) {\n")
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$arg_val1>\n".format(EXPORTED))
+        asp_fh.write("}\n\n")
 
-        aspect_fh.write("info: expand(module_exit(x)) {\n")
-        aspect_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$arg_val1>\n".format(EXIT))
-        aspect_fh.write("}\n\n")
+        asp_fh.write("info: expand(module_init(x)) {\n")
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$arg_val1>\n".format(INIT))
+        asp_fh.write("}\n\n")
 
-        aspect_fh.write("info: define($) {\n")
-        aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s\\n\",$path,$line,$macro_name>\n".format(DEFINE))
-        aspect_fh.write("}\n\n")
+        asp_fh.write("info: expand(module_exit(x)) {\n")
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$arg_val1>\n".format(EXIT))
+        asp_fh.write("}\n\n")
 
+        asp_fh.write("info: define($) {\n")
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s %s\\n\",$path,$macro_name,$line>\n".format(DEFINE))
+        asp_fh.write("}\n\n")
+
+        # Currently there is no way to find macro functions without specifying exact number of arguments: one argument (arg1), two arguments (arg1, arg2), and so on (CIF issue)
         for args in ["arg1", "arg1, arg2", "arg1, arg2, arg3"]:
-            aspect_fh.write("info: define($({})) {{\n".format(args))
-            aspect_fh.write("  $fprintf<\"{}\",\"%s %s %s\\n\",$path,$line,$macro_name>\n".format(DEFINE))
-            aspect_fh.write("}\n\n")
+            asp_fh.write("info: define($({})) {{\n".format(args))
+            asp_fh.write("  $fprintf<\"{}\",\"%s %s %s\\n\",$path,$macro_name,$line>\n".format(DEFINE))
+            asp_fh.write("}\n\n")
 
-        CIF_OUTPUT.append(EXPORTED)
-        CIF_OUTPUT.append(INIT)
-        CIF_OUTPUT.append(EXIT)
-        CIF_OUTPUT.append(DEFINE)
-        CIF_OUTPUT.append(CALLP)
-        CIF_OUTPUT.append(USE_FUNC)
-        CIF_OUTPUT.append(USE_VAR)
-        CIF_OUTPUT.append(INIT_GLOBAL)
-        CIF_OUTPUT.append(OF)
+    return aspect
 
 
-def process_bc(bc, cif):
+def process_build_commands(bc, cif, aspect):
     print("Processing build commands")
-
-    current_command = 0
-    number_of_commands = 0
-    src = ""
 
     with open(bc, "r") as bc_fh:
         bc_json = json.load(bc_fh)
 
+        # json must be valid
         if "src" not in bc_json:
-            sys.exit("Can't find path to source tree root")
+            sys.exit("Can't find path to source tree root in bc json")
         elif "build commands" not in bc_json:
-            sys.exit("Can't find build commands")
-
-        src = bc_json["src"]
-        if not os.path.isdir(src):
+            sys.exit("Can't find build commands in bc json")
+        elif not os.path.isdir(bc_json["src"]):
             sys.exit("Specified path to source tree root is not valid")
-        src = os.path.abspath(src)
+
+        src = os.path.abspath(bc_json["src"])
 
         number_of_commands = len(bc_json["build commands"])
         if number_of_commands == 0:
             sys.exit("Specified json file doesn't contain valid gcc or ld commands")
+        curr_number = 0
 
         for command in bc_json["build commands"]:
-            current_command += 1
+            curr_number += 1
 
             if "type" not in command:
                 sys.exit("Can't find 'type' field in the next build command: {}".format(command))
@@ -217,32 +214,34 @@ def process_bc(bc, cif):
                 sys.exit("Can't find 'out' field in build command: {}".format(command))
 
             if command["type"] == "gcc":
-                process_gcc_cmd(command, src, cif)
+                process_cc_command(command, src, cif, aspect)
             elif command["type"] == "ld":
-                process_ld_cmd(command, src)
+                process_ld_command(command, src)
 
-            sys.stdout.write("\r{} of {} commands processed".format(current_command, number_of_commands))
+            sys.stdout.write("\r{} of {} commands processed".format(curr_number, number_of_commands))
         sys.stdout.write("\n")
 
-        os.chdir(CWD)
+        os.chdir(os.getcwd())
 
-        return src
+    return src
 
 
-def process_gcc_cmd(command, src, cif):
-    # Temporary workaround
-    if command["in"] == [] or command["in"][0] == "-" or command["in"][0] == "/dev/null" or command["in"][0] is None or re.search(r'\.(s|S)$', command["in"][0]) or re.search(r'\.o$', command["in"][0]):
+def process_cc_command(command, src, cif, aspect):
+    # Workarounds for bad cc commands
+    if command["in"] == []:
         return
-    if command["out"] is None:
+    elif command["out"] is None:
         return
 
     cif_in = command["in"][0]
 
-    if re.search(r'(/purgatory/)|(/boot/)', cif_in):
-        # TODO: Investigate this issue
+    if cif_in == "-" or cif_in == "/dev/null" or cif_in is None:
+        return
+    elif re.search(r'\.(s|S)$', cif_in) or re.search(r'\.o$', cif_in) or re.search(r'conftest.c', cif_in):
         return
 
-    if re.search(r'conftest.c', cif_in):
+    if re.search(r'(/purgatory/)|(/boot/)', cif_in):
+        # TODO: Investigate this issue
         return
 
     if "cwd" in command:
@@ -253,7 +252,7 @@ def process_gcc_cmd(command, src, cif):
     cif_in = os.path.abspath(cif_in)
 
     cif_out = os.path.join(os.path.abspath(command["out"]), os.path.basename(command["out"]))
-    cif_out = os.path.normpath(os.path.join(CIFDIR, os.path.relpath(cif_out, start=src)))
+    cif_out = os.path.normpath(os.path.join(WD + "/cif/", os.path.relpath(cif_out, start=src)))
 
     if not os.path.isdir(cif_out):
         try:
@@ -262,24 +261,21 @@ def process_gcc_cmd(command, src, cif):
             if e.errno != 17:
                 raise
 
-    os.environ['CC'] = command["out"]
+    os.environ['OBJ'] = command["out"]
 
     cif_args = [cif,
                 "--debug", "ALL",
                 "--in", cif_in,
-                "--aspect", ASPECT,
+                "--aspect", aspect,
                 "--back-end", "src",
                 "--stage", "instrumentation",
                 "--out", cif_out]
 
     cif_args.append("--")
+    cif_args.append("-iquote{}".format(os.path.dirname(cif_in)))
 
-    cif_opts = []
-    cif_opts.append("-iquote{}".format(os.path.dirname(cif_in)))
-    cif_opts.extend(command["opts"])
-
-    for opt in cif_opts:
-        # Related with old GCC (Aspectator) bugs.
+    for opt in command["opts"]:
+        # Aspectator is based on GCC 4.6 which doesn't support some options
         if opt == "-Wno-maybfe-uninitialized":
             continue
         elif opt == "--param=allow-store-data-races=0":
@@ -306,10 +302,10 @@ def process_gcc_cmd(command, src, cif):
     cif_args.extend([">", cif_log, '2>&1'])
 
     cif_args_str = ' '.join(cif_args)
+    if subprocess.call(cif_args_str, shell=True):
+        store_error_information(cif_args_str, cif_log)
 
-    if os.system(cif_args_str):
-        dump_error_information(cif_args_str, cif_log)
-
+    # Add gathered information to KM
     rel_in = os.path.relpath(command["in"][0], start=src)
     rel_out = os.path.relpath(command["out"], start=src)
     KM["source files"][rel_in]["compiled to"][rel_out] = 1
@@ -318,7 +314,7 @@ def process_gcc_cmd(command, src, cif):
     os.chdir(src)
 
 
-def dump_error_information(args, log):
+def store_error_information(args, log):
     with open(log, "r") as log_fh:
         log_str = log_fh.readlines()
 
@@ -329,75 +325,56 @@ def dump_error_information(args, log):
         log_fh.write("\n\n")
 
 
-def process_ld_cmd(command, src):
+def process_ld_command(command, src):
     if command["out"] == None:
         out = "unknown"
     else:
-        out = os.path.normpath(command["out"])
-        out = os.path.relpath(out, start=src)
+        out = command["out"]
 
     for in_file in command["in"]:
-        in_file_n = os.path.normpath(in_file)
-        in_file_n = os.path.relpath(in_file_n, start=src)
-
-        KM["object files"][out]["linked from"][in_file_n] = 1
-        KM["object files"][in_file_n]["linked to"][out] = 1
+        KM["object files"][out]["linked from"][in_file] = 1
+        KM["object files"][in_file]["linked to"][out] = 1
 
 
 def normalize_cif_output(src):
     print("Normalizing CIF output")
 
-    for output_file in CIF_OUTPUT:
-        if (not os.path.isfile(output_file)):
-            print("Couldn't find '{}'".format(output_file))
+    for file in FILES:
+        if (not os.path.isfile(file)):
+            print("Couldn't find '{}'".format(file))
             continue
 
-        with open(output_file, "r") as output_fh:
-            with open(output_file + ".temp", "w") as temp_fh:
-                for line in output_fh:
-                    m = re.match(r'(\S*) (.*)', line)
+        seen = set()
 
-                    if m:
-                        path = m.group(1)
-                        rest = m.group(2)
+        with open(file, "r") as fh:
+            with open(file + ".temp", "w") as temp_fh:
+                for line in fh:
+                    if line not in seen:
+                        seen.add(line)
+                        m = re.match(r'(\S*) (.*)', line)
 
-                        path = os.path.normpath(path)
-                        if os.path.isabs(path):
-                            path = os.path.relpath(path, start=src)
+                        if m:
+                            path = m.group(1)
+                            rest = m.group(2)
 
-                        if output_file == OF:
-                            rest = os.path.normpath(rest)
-                            if os.path.isabs(rest):
-                                rest = os.path.relpath(rest, start=src)
+                            path = os.path.normpath(path)
+                            if os.path.isabs(path):
+                                path = os.path.relpath(path, start=src)
 
-                        temp_fh.write("{} {}\n".format(path, rest))
+                            if file == OF:
+                                rest = os.path.normpath(rest)
+                                if os.path.isabs(rest):
+                                    rest = os.path.relpath(rest, start=src)
 
-        os.remove(output_file)
-        os.rename(output_file + ".temp", output_file)
+                            temp_fh.write("{} {}\n".format(path, rest))
 
-
-def remove_duplicate_lines():
-    print("Removing duplicate lines in CIF output")
-
-    for output_file in CIF_OUTPUT:
-        if (not os.path.isfile(output_file)):
-            continue
-
-        dup_lines = dict()
-
-        with open(output_file, "r") as output_fh:
-            with open(output_file + ".temp", "w") as temp_fh:
-                for line in output_fh:
-                    if line not in dup_lines:
-                        temp_fh.write(line)
-                        dup_lines[line] = 1
-
-        os.remove(output_file)
-        os.rename(output_file + ".temp", output_file)
+        os.remove(file)
+        os.rename(file + ".temp", file)
 
 
 def process_of():
-    print("Processing translation units")
+    print("Identification relationship between object and source files")
+
     with open(OF, "r") as of_fh:
         for line in of_fh:
             m = re.match(r'(\S*) (\S*)', line)
@@ -408,17 +385,13 @@ def process_of():
                 KM["source files"][source_file]["compiled to"][object_file] = 1
                 KM["object files"][object_file]["compiled from"][source_file] = 1
 
-
-def process_ld():
-    print("Processing link commands")
-
     for source_file in KM["source files"]:
         for object_file in KM["source files"][source_file]["compiled to"]:
             viewed_object_files = dict()
-            process_ld_recursive(source_file, object_file, viewed_object_files)
+            process_of_recursive(source_file, object_file, viewed_object_files)
 
 
-def process_ld_recursive(source_file, object_file, viewed_object_files):
+def process_of_recursive(source_file, object_file, viewed_object_files):
     if "linked to" not in KM["object files"][object_file]:
         return
     elif object_file in viewed_object_files:
@@ -428,38 +401,32 @@ def process_ld_recursive(source_file, object_file, viewed_object_files):
 
     for linked_to in KM["object files"][object_file]["linked to"]:
         KM["source files"][source_file]["used in"][linked_to] = 1
-        process_ld_recursive(source_file, linked_to, viewed_object_files)
+        process_of_recursive(source_file, linked_to, viewed_object_files)
 
 
-def process_exe():
+def process_execution():
     print("Processing definitions")
-    for exe_file in EXE_FILES:
-        if not os.path.isfile(exe_file):
-            continue
+    if not os.path.isfile(EXECUTION):
+        return
 
-        with open(exe_file, "r") as exe_fh:
-            for line in exe_fh:
-                m = re.match(r'(\S*) (\S*) (\S*) (.*)', line)
-                if m:
-                    src_file = m.group(1)
-                    def_line = m.group(2)
-                    func = m.group(3)
-                    func_signature = m.group(4)
-                    func_type = "ordinary"
+    with open(EXECUTION, "r") as exe_fh:
+        for line in exe_fh:
+            m = re.match(r'(\S*) (\S*) (\S*) (\S*)', line)
+            if m:
+                src_file = m.group(1)
+                func = m.group(2)
+                def_line = m.group(3)
+                func_type = m.group(4)
 
-                    if re.search(r'static', exe_file):
-                        func_type = "static"
+                if func in KM["functions"] and src_file in KM["functions"][func]:
+                    k_error("Function is defined more than once: '{}' '{}'".format(func, src_file))
+                    continue
 
-                    if func in KM["functions"] and src_file in KM["functions"][func]:
-                        kmg_error("Function '{}' is defined more than once in '{}'".format(func, src_file))
-                        continue
-
-                    KM["functions"][func][src_file]["type"] = func_type
-                    KM["functions"][func][src_file]["signature"] = func_signature
-                    KM["functions"][func][src_file]["defined on line"] = def_line
+                KM["functions"][func][src_file]["type"] = func_type
+                KM["functions"][func][src_file]["defined on line"] = def_line
 
 
-def process_exp():
+def process_exported():
     # Linux kernel only
     if not os.path.isfile(EXPORTED):
         return
@@ -481,7 +448,7 @@ def process_exp():
                 KM["functions"][func][src_file]["type"] = "exported"
 
 
-def process_def():
+def process_define():
     if not os.path.isfile(DEFINE):
         return
     print("Processing macro functions")
@@ -491,43 +458,36 @@ def process_def():
             m = re.match(r'(\S*) (\S*) (\S*)', line)
             if m:
                 src_file = m.group(1)
-                line = m.group(2)
-                macro = m.group(3)
+                macro = m.group(2)
+                line = m.group(3)
 
                 KM["macros"][macro][src_file] = line
 
 
 def process_decl():
     print("Processing declarations")
-    for decl_file in DECL_FILES:
-        if not os.path.isfile(decl_file):
-            continue
+    if not os.path.isfile(DECL):
+        return
 
-        with open(decl_file, "r") as decl_fh:
-            for line in decl_fh:
-                m = re.match(r'(\S*) (\S*) (\S*)', line)
-                if m:
-                    decl_file = m.group(1)
-                    decl_name = m.group(2)
-                    def_line = m.group(3)
+    with open(DECL, "r") as decl_fh:
+        for line in decl_fh:
+            m = re.match(r'(\S*) (\S*) (\S*)', line)
+            if m:
+                decl_file = m.group(1)
+                decl_name = m.group(2)
+                def_line = m.group(3)
 
-                    if decl_name not in KM["functions"]:
-                        continue
+                if decl_name not in KM["functions"]:
+                    continue
 
-                    decl_type = "ordinary"
-                    if re.search(r'static', decl_file):
-                        decl_type = "static"
-
-                    for src_file in KM["functions"][decl_name]:
-                        if ((KM["functions"][decl_name][src_file]["type"] == decl_type) or
-                           (KM["functions"][decl_name][src_file]["type"] == "exported")):
-                            if src_file == decl_file:
-                                KM["functions"][decl_name][src_file]["declared in"][decl_file] = def_line
-                            elif list(set(KM["source files"][src_file]["compiled to"]) &
-                                      set(KM["source files"][decl_file]["compiled to"])):
-                                KM["functions"][decl_name][src_file]["declared in"][decl_file] = def_line
-                        elif src_file == "unknown":
-                            KM["functions"][decl_name]["unknown"]["declared in"][decl_file] = def_line
+                for src_file in KM["functions"][decl_name]:
+                    if src_file == decl_file:
+                        KM["functions"][decl_name][src_file]["declared in"][decl_file] = def_line
+                    elif list(set(KM["source files"][src_file]["compiled to"]) &
+                              set(KM["source files"][decl_file]["compiled to"])):
+                        KM["functions"][decl_name][src_file]["declared in"][decl_file] = def_line
+                    elif src_file == "unknown":
+                        KM["functions"][decl_name]["unknown"]["declared in"][decl_file] = def_line
 
 
 def process_init():
@@ -560,48 +520,26 @@ def process_exit():
                 KM["functions"][func][file]["exit"] = True
 
 
-def build_km():
-    print("Building KM")
+def process_call():
+    if not os.path.isfile(CALL):
+        return
+    print("Processing calls")
 
-    global call_type
-    global context_file
-    global context_func
-    global call_line
-    global func
-    global call_decl_line
+    with open(CALL, "r") as call_fh:
+        for line in call_fh:
+            m = re.match(r'(\S*) (\S*) (\S*) (\S*) (\S*)', line)
+            if m:
+                context_file = m.group(1)
+                context_func = m.group(2)
+                func = m.group(3)
+                call_line = m.group(4)
+                call_type = m.group(5)
 
-    for call_file in CALL_FILES:
-        if not os.path.isfile(call_file):
-            continue
-
-        with open(call_file, "r") as call_fh:
-            call_type = "ordinary"
-            if re.search(r'static', call_file):
-                call_type = "static"
-
-            for line in call_fh:
-                m = re.match(r'(\S*) (\S*) (\S*) (\S*) (\S*)', line)
-                if m:
-
-                    context_file = m.group(1)
-                    context_func = m.group(2)
-                    call_line = m.group(3)
-                    func = m.group(4)
-                    call_decl_line = m.group(5)
-
-                    match_call_and_def()
-
-    process_callp()
-    process_init_global()
-    process_use_var()
-    process_use_func()
-    reverse_km()
-    refine_source_files()
-    clean_kmg_err()
+                match_call_and_def(context_file, context_func, func, call_line, call_type)
 
 
-def match_call_and_def():
-    # Some Linux workarounds
+def match_call_and_def(context_file, context_func, func, call_line, call_type):
+    # __builtin and __compiletime functions are not included in KM
     if re.match(r'(__builtin)|(__compiletime)', func):
         return
     if re.match(r'__bad', func) and func not in KM["functions"]:
@@ -612,74 +550,74 @@ def match_call_and_def():
         KM["functions"][func]["unknown"]["type"] = call_type
         KM["functions"][func]["unknown"]["called in"][context_func][context_file][call_line] = 0
 
-        kmg_error("NO_DEFS_IN_KM: {}".format(func))
-
+        k_error("Without definition: {}".format(func))
         return
 
-    possible_src = []
-    for src_file in KM["functions"][func]:
-        if src_file == "unknown":
+    # For each function call there can be many definitions with the same name, defined in different files.
+    # possible_files is a list of them.
+    possible_files = []
+    for possible_file in KM["functions"][func]:
+        if possible_file == "unknown":
             continue
-        elif (KM["functions"][func][src_file]["type"] == call_type or
-              KM["functions"][func][src_file]["type"] == "exported"):
-            possible_src.append(src_file)
+        elif (KM["functions"][func][possible_file]["type"] == call_type or
+              KM["functions"][func][possible_file]["type"] == "exported"):
+            possible_files.append(possible_file)
 
-    if len(possible_src) == 0:
+    # If there is no possible definitions:
+    if len(possible_files) == 0:
         KM["functions"][func]["unknown"]["defined on line"] = "unknown"
         KM["functions"][func]["unknown"]["type"] = call_type
         KM["functions"][func]["unknown"]["called in"][context_func][context_file][call_line] = 0
 
-        # It will be a generator's fault until it supports aliases
+        # It will be a kartographer's fault until it supports aliases
         if not re.match(r'__mem', func):
-            kmg_error("NO_POSSIBLE_DEFS: {}".format(func))
+            k_error("No possible definitions: {}".format(func))
     else:
-        found_src = [None] * 7
-        for x in range(0, len(found_src)):
-            found_src[x] = []
+        # Assign priority number for each possible definition. Examples:
+        # 5 means that definition is located in the same file as the call
+        # 4 - in the same translation unit
+        # 3 - in the object file that is linked with the object file that contains the call
+        # 2 reserved for exported functions (Linux kernel only)
+        # 1 - TODO: investigate this case
+        # 0 - definition is not found
+        matched_files = [None] * 6
+        for x in range(0, len(matched_files)):
+            matched_files[x] = []
 
-        for src_file in possible_src:
-            if KM["functions"][func][src_file]["type"] == "exported":
-                found_src[1].append(src_file)
-                continue
-
-            def_line = KM["functions"][func][src_file]["defined on line"]
-
-            if src_file == context_file:
-                found_src[5].append(src_file)
-            elif (call_decl_line == def_line and
-                  list(set(KM["source files"][src_file]["compiled to"]) &
+        for possible_file in possible_files:
+            if possible_file == context_file:
+                matched_files[5].append(possible_file)
+            elif (list(set(KM["source files"][possible_file]["compiled to"]) &
                        set(KM["source files"][context_file]["compiled to"]))):
-                found_src[4].append(src_file)
-            elif (list(set(KM["source files"][src_file]["compiled to"]) &
-                       set(KM["source files"][context_file]["compiled to"]))):
-                found_src[3].append(src_file)
-            elif (call_type == "ordinary" and
-                  ("used in" in KM["source files"][src_file] and
+                matched_files[4].append(possible_file)
+            elif (call_type == "global" and
+                  ("used in" in KM["source files"][possible_file] and
                    "used in" in KM["source files"][context_file] and
-                   list(set(KM["source files"][src_file]["used in"]) &
+                   list(set(KM["source files"][possible_file]["used in"]) &
                         set(KM["source files"][context_file]["used in"])))):
-                found_src[2].append(src_file)
-            elif call_type == "ordinary":
-                for decl_file in KM["functions"][func][src_file]["declared in"]:
+                matched_files[3].append(possible_file)
+            elif (call_type == "global" and KM["functions"][func][possible_file]["type"] == "exported"):
+                matched_files[2].append(possible_file)
+            elif call_type == "global":
+                for decl_file in KM["functions"][func][possible_file]["declared in"]:
                     if list(set(KM["source files"][decl_file]["compiled to"]) &
                             set(KM["source files"][context_file]["compiled to"])):
-                        found_src[1].append(src_file)
-                        break
+                        matched_files[1].append(possible_file)
 
-        found_src[0].append("unknown")
+        matched_files[0].append("unknown")
 
-        for x in range(len(found_src) - 1, -1, -1):
-            if found_src[x] != []:
-                if len(found_src[x]) > 1:
-                    kmg_error("MULTIPLE_MATCHES: {} call in {}".format(func, context_file))
-                for src_file in found_src[x]:
-                    KM["functions"][func][src_file]["called in"][context_func][context_file][call_line] = x
+        for x in range(len(matched_files) - 1, -1, -1):
+            if matched_files[x] != []:
+                if len(matched_files[x]) > 1:
+                    k_error("Multiple matches: {} {}".format(func, context_func))
+                for possible_file in matched_files[x]:
+                    KM["functions"][func][possible_file]["called in"][context_func][context_file][call_line] = x
 
-                    if src_file == "unknown":
-                        KM["functions"][func][src_file]["defined on line"] = "unknown"
-                        KM["functions"][func][src_file]["type"] = call_type
+                    if possible_file == "unknown":
+                        KM["functions"][func][possible_file]["defined on line"] = "unknown"
+                        KM["functions"][func][possible_file]["type"] = call_type
 
-                        kmg_error("CANT_MATCH_DEF: {} call in {}".format(func, context_file))
+                        k_error("Can't match definition: {} {}".format(func, context_file))
                 break
 
 
@@ -693,8 +631,8 @@ def process_callp():
             if m:
                 context_file = m.group(1)
                 context_func = m.group(2)
-                call_line = m.group(3)
-                func_ptr = m.group(4)
+                func_ptr = m.group(3)
+                call_line = m.group(4)
 
                 KM["functions"][context_func][context_file]["calls by pointer"][func_ptr][call_line] = 1
 
@@ -723,15 +661,13 @@ def process_init_global():
                         valueType = m.group(2)
                         variables[var_name][file]["values"][value] = valueType
 
-    global viewed
-
     for var_name in variables:
         for file in variables[var_name]:
             viewed = nested_dict()
-            match_var_and_value(variables, var_name, file, var_name, file)
+            match_var_and_value(variables, viewed, var_name, file, var_name, file)
 
 
-def match_var_and_value(variables, var_name, file, origvar_name, original_file):
+def match_var_and_value(variables, viewed, var_name, file, origvar_name, original_file):
     if var_name in viewed and file in viewed[var_name]:
         return
 
@@ -741,55 +677,45 @@ def match_var_and_value(variables, var_name, file, origvar_name, original_file):
         if variables[var_name][file]["values"][value] == "1":
             KM["variables"][origvar_name][original_file]["values"][value] = 1
         elif value in variables:
-            for src_file in variables[value]:
-                if src_file == file:
-                    match_var_and_value(variables, value, src_file, origvar_name, original_file)
-                elif (list(set(KM["source files"][src_file]["compiled to"]) &
+            for possible_file in variables[value]:
+                if possible_file == file:
+                    match_var_and_value(variables, viewed, value, possible_file, origvar_name, original_file)
+                elif (list(set(KM["source files"][possible_file]["compiled to"]) &
                            set(KM["source files"][file]["compiled to"]))):
-                    match_var_and_value(variables, value, src_file, origvar_name, original_file)
+                    match_var_and_value(variables, viewed, value, possible_file, origvar_name, original_file)
 
 
 def process_use_var():
     if not os.path.isfile(USE_VAR):
         return
 
-    global file
-    global func
-    global context_func
-    global line
-
     with open(USE_VAR, "r") as use_var_fh:
         for file_line in use_var_fh:
             m = re.match(r'(\S*) (\S*) (\S*) (\S*)', file_line)
             if m:
-                file = m.group(1)
+                context_file = m.group(1)
                 context_func = m.group(2)
                 var_name = m.group(3)
                 line = m.group(4)
 
                 if var_name in KM["variables"]:
-                    for src_file in KM["variables"][var_name]:
-                        if src_file == file:
-                            for func in KM["variables"][var_name][src_file]["values"]:
-                                match_use_and_def()
-                        elif (list(set(KM["source files"][src_file]["compiled to"]) &
-                                   set(KM["source files"][file]["compiled to"]))):
-                            for func in KM["variables"][var_name][src_file]["values"]:
-                                match_use_and_def()
-                        elif ("used in" in KM["source files"][src_file] and
-                                "used in" in KM["source files"][file] and
-                                list(set(KM["source files"][src_file]["used in"]) &
-                                     set(KM["source files"][file]["used in"]))):
-                            for func in KM["variables"][var_name][src_file]["values"]:
-                                match_use_and_def()
+                    for possible_file in KM["variables"][var_name]:
+                        if possible_file == context_file:
+                            for func in KM["variables"][var_name][possible_file]["values"]:
+                                match_use_and_def(context_file, context_func, func, line)
+                        elif (list(set(KM["source files"][possible_file]["compiled to"]) &
+                                   set(KM["source files"][context_file]["compiled to"]))):
+                            for func in KM["variables"][var_name][possible_file]["values"]:
+                                match_use_and_def(context_file, context_func, func, line)
+                        elif ("used in" in KM["source files"][possible_file] and
+                                "used in" in KM["source files"][context_file] and
+                                list(set(KM["source files"][possible_file]["used in"]) &
+                                     set(KM["source files"][context_file]["used in"]))):
+                            for func in KM["variables"][var_name][possible_file]["values"]:
+                                match_use_and_def(context_file, context_func, func, line)
 
 
 def process_use_func():
-    global file
-    global func
-    global context_func
-    global line
-
     if not os.path.isfile(USE_FUNC):
         return
 
@@ -797,87 +723,82 @@ def process_use_func():
         for file_line in use_func_fh:
             m = re.match(r'(\S*) (\S*) (\S*) (\S*)', file_line)
             if m:
-                file = m.group(1)
+                context_file = m.group(1)
                 context_func = m.group(2)
-                line = m.group(3)
-                func = m.group(4)
+                func = m.group(3)
+                line = m.group(4)
 
-                match_use_and_def()
+                match_use_and_def(context_file, context_func, func, line)
 
 
-def match_use_and_def():
+def match_use_and_def(context_file, context_func, func, line):
+    if re.match(r'(__builtin)|(__compiletime)', func):
+        return
     if func not in KM["functions"]:
-        kmg_error("USE_UNKNOW_FUNCTION: {}".format(func))
-
+        k_error("Use of function without definition: {}".format(func))
         return
 
-    possible_src = []
-    for src_file in KM["functions"][func]:
-        if src_file == "unknown":
+    possible_files = []
+    for possible_file in KM["functions"][func]:
+        if possible_file == "unknown":
             continue
-        possible_src.append(src_file)
+        possible_files.append(possible_file)
 
-    if len(possible_src) == 0:
-        kmg_error("NO_POSSIBLE_DEFS_FOR_USE: {}".format(func))
+    if len(possible_files) == 0:
+        k_error("No possible definitions for use: {}".format(func))
     else:
-        found_src = [None] * 4
-        for x in range(0, len(found_src)):
-            found_src[x] = []
+        matched_files = [None] * 4
+        for x in range(0, len(matched_files)):
+            matched_files[x] = []
 
-        for src_file in possible_src:
+        for possible_file in possible_files:
+            if possible_file == context_file:
+                matched_files[3].append(possible_file)
+            elif (list(set(KM["source files"][possible_file]["compiled to"]) &
+                       set(KM["source files"][context_file]["compiled to"]))):
+                matched_files[2].append(possible_file)
+            elif ("used in" in KM["source files"][possible_file] and
+                    "used in" in KM["source files"][context_file] and
+                    list(set(KM["source files"][possible_file]["used in"]) &
+                         set(KM["source files"][context_file]["used in"]))):
+                matched_files[1].append(possible_file)
 
-            if src_file == file:
-                found_src[3].append(src_file)
-            elif (list(set(KM["source files"][src_file]["compiled to"]) &
-                       set(KM["source files"][file]["compiled to"]))):
-                found_src[2].append(src_file)
-            elif ("used in" in KM["source files"][src_file] and
-                    "used in" in KM["source files"][file] and
-                    list(set(KM["source files"][src_file]["used in"]) &
-                         set(KM["source files"][file]["used in"]))):
-                found_src[1].append(src_file)
+        matched_files[0].append("unknown")
 
-        found_src[0].append("unknown")
-
-        for x in range(len(found_src) - 1, -1, -1):
-            if found_src[x] != []:
-                if len(found_src[x]) > 1:
-                    kmg_error("MULTIPLE_MATCHES_FOR_USE: {} call in {}".format(func, file))
-                for src_file in found_src[x]:
+        for x in range(len(matched_files) - 1, -1, -1):
+            if matched_files[x] != []:
+                if len(matched_files[x]) > 1:
+                    k_error("Multiple matches for use: {} call in {}".format(func, context_func))
+                for possible_file in matched_files[x]:
                     if context_func == "NULL":
-                        KM["functions"][func][src_file]["used in file"][file][line] = x
+                        KM["functions"][func][possible_file]["used in file"][context_file][line] = x
                     else:
-                        KM["functions"][func][src_file]["used in func"][context_func][file][line] = x
+                        KM["functions"][func][possible_file]["used in func"][context_func][context_file][line] = x
 
-                    if src_file == "unknown":
-                        kmg_error("CANT_MATCH_DEF_FOR_USE: {} call in {}".format(func, file))
+                    if possible_file == "unknown":
+                        k_error("Can't match definition for use: {} {}".format(func, context_file))
                 break
 
 
 def reverse_km():
     for func in KM["functions"]:
-        for src_file in KM["functions"][func]:
-            for context_func in KM["functions"][func][src_file]["called in"]:
-                for context_file in KM["functions"][func][src_file]["called in"][context_func]:
-                    KM["functions"][context_func][context_file]["calls"][func][src_file] = KM["functions"][func][src_file]["called in"][context_func][context_file]
-            if "used in func" in KM["functions"][func][src_file]:
-                for context_func in KM["functions"][func][src_file]["used in func"]:
-                    for context_file in KM["functions"][func][src_file]["used in func"][context_func]:
-                        KM["functions"][context_func][context_file]["uses"][func][src_file] = KM["functions"][func][src_file]["used in func"][context_func][context_file]
+        for file in KM["functions"][func]:
+            def_line = KM["functions"][func][file]["defined on line"]
+            KM["source files"][file]["defines"][func] = def_line
 
-
-def refine_source_files():
-    for func in KM["functions"]:
-        for src_file in KM["functions"][func]:
-            def_line = KM["functions"][func][src_file]["defined on line"]
-            KM["source files"][src_file]["defines"][func] = def_line
-
+            for context_func in KM["functions"][func][file]["called in"]:
+                for context_file in KM["functions"][func][file]["called in"][context_func]:
+                    KM["functions"][context_func][context_file]["calls"][func][file] = KM["functions"][func][file]["called in"][context_func][context_file]
+            if "used in func" in KM["functions"][func][file]:
+                for context_func in KM["functions"][func][file]["used in func"]:
+                    for context_file in KM["functions"][func][file]["used in func"][context_func]:
+                        KM["functions"][context_func][context_file]["uses"][func][file] = KM["functions"][func][file]["used in func"][context_func][context_file]
     for macro in KM["macros"]:
-        for src_file in KM["macros"][macro]:
-            KM["source files"][src_file]["defines"][macro] = 1
+        for file in KM["macros"][macro]:
+            KM["source files"][file]["defines"][macro] = 1
 
 
-def clean_kmg_err():
+def clean_error_log():
     """
     Removes duplicate error messages in ERR_LOG file.
     """
@@ -908,7 +829,7 @@ def store_km(km_file):
         json.dump(KM, km_fh, sort_keys=True, indent=4)
 
 
-def kmg_error(str):
+def k_error(str):
     """
     Prints to ERR_LOG file an error message related to work of the generator itself.
     """
@@ -917,47 +838,44 @@ def kmg_error(str):
         err_fh.write("{}\n".format(str))
 
 if __name__ == "__main__":
-    # Parsing of command line options.
     parser = argparse.ArgumentParser()
     parser.add_argument('--bc', metavar='PATH', help='set PATH to json with build commands', required=True)
     parser.add_argument('--cif', metavar='PATH', help='set PATH to CIF executable', default="cif")
-    parser.add_argument('--km', metavar='FILE', help='store generated KM in FILE', default=WORKDIR + "/km.json")
+    parser.add_argument('--km', metavar='FILE', help='store generated KM in FILE', default=WD + "/km.json")
     options = parser.parse_args()
 
-    # Only --bc option is required - it specifies path to json file that contains linking and compilation commands (build commands, bc) of analysed project.
-    # --cif option is not required, but in this case path to cif should be located in $PATH
-
+    # Only --bc option is required - it specifies path to json file that contains linking and compilation commands (build commands) of analysed project.
     if not os.path.isfile(options.bc):
         sys.exit("{} is not a file".format(options.bc))
 
-    try:
-        proc = subprocess.Popen([options.cif], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        (out, err) = proc.communicate()
-    except FileNotFoundError as e:
-        if e.errno != 2:
-            raise
-        sys.exit("You should specify --cif option")
+    # --cif option is not required, but in this case it will be searched in $PATH
 
-    if os.path.isdir(WORKDIR):
-        sys.exit("Working directory {} already exists. Please delete or backup it and relunch the script".format(WORKDIR))
+    if os.path.isdir(WD):
+        sys.exit("Working directory {} already exists. Please delete or backup it and relunch the script".format(WD))
     else:
-        os.mkdir(WORKDIR)
+        os.mkdir(WD)
 
-    gen_info_requests()
-    src = process_bc(options.bc, options.cif)
+    aspect = gen_info_requests()
+    src = process_build_commands(options.bc, options.cif, aspect)
 
     normalize_cif_output(src)
-    remove_duplicate_lines()
 
+    # Process files generated by CIF
     process_of()
-    process_ld()
-    process_exe()
-    process_exp()
-    process_def()
+    process_execution()
+    process_exported()
+    process_define()
     process_init()
     process_exit()
     process_decl()
 
-    build_km()
+    process_call()
+    process_callp()
+    process_init_global()
+    process_use_var()
+    process_use_func()
+    reverse_km()
+    clean_error_log()
+
     store_km(options.km)
     print("Complete")
