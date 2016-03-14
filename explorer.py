@@ -52,67 +52,95 @@ def KM_dump(mode, name):
         if name not in KM["functions"]:
             print("Function {} is not found in KM".format(colored(name, func_color)))
         else:
-            for src_file in KM["functions"][name]:
-                func_type = KM["functions"][name][src_file]["type"]
-                decl_line = KM["functions"][name][src_file]["decl line"]
-                if "signature" in KM["functions"][name][src_file]:
-                    signature = KM["functions"][name][src_file]["signature"]
-                else:
-                    signature = name
+            for file in KM["functions"][name]:
+                func_type = KM["functions"][name][file]["type"]
+                def_line = KM["functions"][name][file]["defined on line"]
 
                 print("{} function {} is defined in {} in line {} and:".format(
                       colored(func_type, type_color),
-                      colored(signature, func_color),
-                      colored(src_file, file_color),
-                      colored(decl_line, line_color)))
+                      colored(name, func_color),
+                      colored(file, file_color),
+                      colored(def_line, line_color)))
 
-                if "declared in" not in KM["functions"][name][src_file]:
+                if "declared in" not in KM["functions"][name][file]:
                     print("  is not declared anywhere")
                 else:
                     print("  is declared in:")
 
-                    for declared in KM["functions"][name][src_file]["declared in"]:
+                    for declared in KM["functions"][name][file]["declared in"]:
                         print("    {}".format(colored(declared, file_color)))
 
-                if "called in" not in KM["functions"][name][src_file]:
-                    print("  is not called anywhere")
+                if "called in" not in KM["functions"][name][file]:
+                    print("  is called nowhere")
                 else:
                     print("  is called in:")
 
-                    for context_func in KM["functions"][name][src_file]["called in"]:
-                        for context_file in KM["functions"][name][src_file]["called in"][context_func]:
-                            for call_line in KM["functions"][name][src_file]["called in"][context_func][context_file]:
-                                level = KM["functions"][name][src_file]["called in"][context_func][context_file][call_line]
-                            lines = ' '.join(list(KM["functions"][name][src_file]["called in"][context_func][context_file]))
+                    for context_func in KM["functions"][name][file]["called in"]:
+                        for context_file in KM["functions"][name][file]["called in"][context_func]:
+                            for call_line in KM["functions"][name][file]["called in"][context_func][context_file]:
+                                level = KM["functions"][name][file]["called in"][context_func][context_file][call_line]
+                            lines = ' '.join(list(KM["functions"][name][file]["called in"][context_func][context_file]))
                             print("    {}: {:<55} in   {:<55} in lines {}".format(
                                   level,
                                   colored(context_func, func_color),
                                   colored(context_file, file_color),
                                   colored(lines, line_color)))
 
-                if "calls" not in KM["functions"][name][src_file]:
+                if "calls" not in KM["functions"][name][file]:
                     print("  doesn't call anything")
                 else:
                     print("  calls:")
 
-                    for called_func in KM["functions"][name][src_file]["calls"]:
-                        for called_file in KM["functions"][name][src_file]["calls"][called_func]:
-                            for call_line in KM["functions"][name][src_file]["calls"][called_func][called_file]:
-                                level = KM["functions"][name][src_file]["calls"][called_func][called_file][call_line]
-                            lines = ' '.join(list(KM["functions"][name][src_file]["calls"][called_func][called_file]))
+                    for called_func in KM["functions"][name][file]["calls"]:
+                        for called_file in KM["functions"][name][file]["calls"][called_func]:
+                            for call_line in KM["functions"][name][file]["calls"][called_func][called_file]:
+                                level = KM["functions"][name][file]["calls"][called_func][called_file][call_line]
+                            lines = ' '.join(list(KM["functions"][name][file]["calls"][called_func][called_file]))
                             print("    {}: {:<55} from {:<55} in lines {}".format(
                                   level,
                                   colored(called_func, func_color),
                                   colored(called_file, file_color),
                                   colored(lines, line_color)))
 
-                if "calls by pointer" not in KM["functions"][name][src_file]:
+                if "used in func" not in KM["functions"][name][file]:
+                    print("  is used nowhere")
+                else:
+                    print("  is used in:")
+
+                    for context_func in KM["functions"][name][file]["used in func"]:
+                        for context_file in KM["functions"][name][file]["used in func"][context_func]:
+                            for use_line in KM["functions"][name][file]["used in func"][context_func][context_file]:
+                                level = KM["functions"][name][file]["used in func"][context_func][context_file][use_line]
+                            lines = ' '.join(list(KM["functions"][name][file]["used in func"][context_func][context_file]))
+                            print("    {}: {:<55} in   {:<55} in lines {}".format(
+                                  level,
+                                  colored(context_func, func_color),
+                                  colored(context_file, file_color),
+                                  colored(lines, line_color)))
+
+                if "uses" not in KM["functions"][name][file]:
+                    print("  doesn't use anything")
+                else:
+                    print("  uses:")
+
+                    for called_func in KM["functions"][name][file]["uses"]:
+                        for called_file in KM["functions"][name][file]["uses"][called_func]:
+                            for use_line in KM["functions"][name][file]["uses"][called_func][called_file]:
+                                level = KM["functions"][name][file]["uses"][called_func][called_file][use_line]
+                            lines = ' '.join(list(KM["functions"][name][file]["uses"][called_func][called_file]))
+                            print("    {}: {:<55} from {:<55} in lines {}".format(
+                                  level,
+                                  colored(called_func, func_color),
+                                  colored(called_file, file_color),
+                                  colored(lines, line_color)))
+
+                if "calls by pointer" not in KM["functions"][name][file]:
                     print("  doesn't call anything by pointer")
                 else:
                     print("  calls by pointer:")
 
-                    for pointer in KM["functions"][name][src_file]["calls by pointer"]:
-                        lines = ' '.join(list(KM["functions"][name][src_file]["calls by pointer"][pointer]))
+                    for pointer in KM["functions"][name][file]["calls by pointer"]:
+                        lines = ' '.join(list(KM["functions"][name][file]["calls by pointer"][pointer]))
                         print("    {:<58} in lines {}".format(
                               colored(pointer, func_color),
                               colored(lines, line_color)))
@@ -120,10 +148,11 @@ def KM_dump(mode, name):
         if name not in KM["macros"]:
             print("Macro {} is not found in KM".format(colored(name, func_color)))
         else:
-            for src_file in KM["macros"][name]:
-                print("Macro function {} is defined in {}".format(
+            for file in KM["macros"][name]:
+                print("Macro {} is defined in {} in line {}".format(
                       colored(name, func_color),
-                      colored(src_file, file_color)))
+                      colored(file, file_color),
+                      colored(KM["macros"][name][file], line_color)))
     elif re.search(r'-s', mode):
         if name not in KM["source files"]:
             print("Source file {} is not found in KM".format(colored(name, file_color)))
@@ -168,7 +197,7 @@ def KM_dump(mode, name):
             else:
                 print("  is linked from:")
                 for source_file in KM["object files"][name]["linked from"]:
-                    print("    {}".format(colored(source_file, file_color)))
+                    print("    {}".format(colored(source_file, object_color)))
 
             if "linked to" not in KM["object files"][name]:
                 print("  is not linked to an object file")
