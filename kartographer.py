@@ -786,9 +786,10 @@ def reverse_km():
             def_line = KM["functions"][func][file]["defined on line"]
             KM["source files"][file]["defines"][func] = def_line
 
-            for context_func in KM["functions"][func][file]["called in"]:
-                for context_file in KM["functions"][func][file]["called in"][context_func]:
-                    KM["functions"][context_func][context_file]["calls"][func][file] = KM["functions"][func][file]["called in"][context_func][context_file]
+            if "called in" in KM["functions"][func][file]:
+                for context_func in KM["functions"][func][file]["called in"]:
+                    for context_file in KM["functions"][func][file]["called in"][context_func]:
+                        KM["functions"][context_func][context_file]["calls"][func][file] = KM["functions"][func][file]["called in"][context_func][context_file]
             if "used in func" in KM["functions"][func][file]:
                 for context_func in KM["functions"][func][file]["used in func"]:
                     for context_file in KM["functions"][func][file]["used in func"][context_func]:
