@@ -161,7 +161,7 @@ def gen_info_requests():
         asp_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$arg_val1>\n".format(EXPORTED))
         asp_fh.write("}\n\n")
 
-        asp_fh.write("info: expand(module_init(x)) {\n")
+        asp_fh.write("info: expand(module_init(x)) || expand(__define_initcall(x, y)) {\n")
         asp_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$arg_val1>\n".format(INIT))
         asp_fh.write("}\n\n")
 
