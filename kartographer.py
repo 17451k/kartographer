@@ -284,11 +284,13 @@ def process_cc_command(command, src, cif, aspect):
             continue
         elif opt == "-fsanitize=kernel-address":
             continue
-        elif opt == "-Werror=date-time":
-            continue
-        elif opt == "-Werror-implicit-function-declaration":
+        elif re.match(r'-Werror', opt):
             continue
         elif opt == "-m16":
+            continue
+        elif re.match(r'-mcpu', opt):
+            continue
+        elif opt == "-mthumb":
             continue
 
         m = re.search(r'-I(.*)', opt)
