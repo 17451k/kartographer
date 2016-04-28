@@ -200,7 +200,7 @@ def process_build_commands(bc, cif, aspect):
 
         number_of_commands = len(bc_json["build commands"])
         if number_of_commands == 0:
-            sys.exit("Specified json file doesn't contain valid gcc or ld commands")
+            sys.exit("Specified json file doesn't contain valid cc or ld commands")
         curr_number = 0
 
         for command in bc_json["build commands"]:
@@ -213,7 +213,7 @@ def process_build_commands(bc, cif, aspect):
             elif "out" not in command:
                 sys.exit("Can't find 'out' field in build command: {}".format(command))
 
-            if command["type"] == "gcc":
+            if command["type"] == "cc":
                 process_cc_command(command, src, cif, aspect)
             elif command["type"] == "ld":
                 process_ld_command(command, src)
