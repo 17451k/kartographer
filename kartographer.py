@@ -339,9 +339,17 @@ def process_ld_command(command, src):
     else:
         out = command["out"]
 
+    os.chdir(command["cwd"])
+
+    out = os.path.relpath(os.path.abspath(out), start=src)
+
     for in_file in command["in"]:
+        in_file = os.path.relpath(os.path.abspath(in_file), start=src)
+
         KM["object files"][out]["linked from"][in_file] = 1
         KM["object files"][in_file]["linked to"][out] = 1
+
+    os.chdir(src)
 
 
 def normalize_cif_output(src):
