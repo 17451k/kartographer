@@ -374,12 +374,12 @@ def normalize_cif_output(src):
                             rest = m.group(2)
 
                             path = os.path.normpath(path)
-                            if os.path.isabs(path):
+                            if os.path.isabs(path) and src in path:
                                 path = os.path.relpath(path, start=src)
 
                             if file == OF:
                                 rest = os.path.normpath(rest)
-                                if os.path.isabs(rest):
+                                if os.path.isabs(rest) and src in rest:
                                     rest = os.path.relpath(rest, start=src)
 
                             temp_fh.write("{} {}\n".format(path, rest))
