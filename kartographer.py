@@ -292,6 +292,12 @@ def process_cc_command(command, src, cif, aspect):
             continue
         elif opt == "-mthumb":
             continue
+        elif opt == "-G0":
+            continue
+        elif opt == "-mips32":
+            continue
+        elif opt == "-mno-abicalls":
+            continue
 
         m = re.search(r'-I(.*)', opt)
         if m:
