@@ -583,34 +583,16 @@ def match_alias_and_func(func, context_file, call_type):
     if func in KM["aliases"]:
         if func in KM["functions"]:
             for possible_file in KM["functions"][func]:
-                if (possible_file == context_file or
-                        (list(set(KM["source files"][possible_file]["compiled to"]) &
-                              set(KM["source files"][context_file]["compiled to"]))) or
-                        ("used in" in KM["source files"][possible_file] and
-                         "used in" in KM["source files"][context_file] and
-                         list(set(KM["source files"][possible_file]["used in"]) &
-                              set(KM["source files"][context_file]["used in"])))):
+                if correlate(possible_file, context_file):
                     return func, call_type
 
         for alias in KM["aliases"][func]:
             if alias in KM["functions"]:
                 alias_file = KM["aliases"][func][alias]
 
-                if (alias_file == context_file or
-                        (list(set(KM["source files"][alias_file]["compiled to"]) &
-                              set(KM["source files"][context_file]["compiled to"]))) or
-                        ("used in" in KM["source files"][alias_file] and
-                         "used in" in KM["source files"][context_file] and
-                         list(set(KM["source files"][alias_file]["used in"]) &
-                              set(KM["source files"][context_file]["used in"])))):
+                if correlate(alias_file, context_file):
                     for possible_file in KM["functions"][alias]:
-                        if (possible_file == context_file or
-                                (list(set(KM["source files"][possible_file]["compiled to"]) &
-                                      set(KM["source files"][context_file]["compiled to"]))) or
-                                ("used in" in KM["source files"][possible_file] and
-                                 "used in" in KM["source files"][context_file] and
-                                 list(set(KM["source files"][possible_file]["used in"]) &
-                                      set(KM["source files"][context_file]["used in"])))):
+                        if correlate(possible_file, context_file):
                             return alias, KM["functions"][alias][possible_file]["type"]
 
     return func, call_type
@@ -664,23 +646,17 @@ def match_call_and_def(context_file, context_func, func, call_line, call_type):
             matched_files[x] = []
 
         for possible_file in possible_files:
-            if possible_file == context_file:
+            if files_are_the_same(possible_file, context_file):
                 matched_files[5].append(possible_file)
-            elif (list(set(KM["source files"][possible_file]["compiled to"]) &
-                       set(KM["source files"][context_file]["compiled to"]))):
+            elif t_unit_is_common(possible_file, context_file):
                 matched_files[4].append(possible_file)
-            elif (call_type == "global" and
-                  ("used in" in KM["source files"][possible_file] and
-                   "used in" in KM["source files"][context_file] and
-                   list(set(KM["source files"][possible_file]["used in"]) &
-                        set(KM["source files"][context_file]["used in"])))):
+            elif call_type == "global" and files_are_linked(possible_file, context_file):
                 matched_files[3].append(possible_file)
-            elif (call_type == "global" and KM["functions"][func][possible_file]["type"] == "exported"):
+            elif call_type == "global" and KM["functions"][func][possible_file]["type"] == "exported":
                 matched_files[2].append(possible_file)
             elif call_type == "global":
                 for decl_file in KM["functions"][func][possible_file]["declared in"]:
-                    if list(set(KM["source files"][decl_file]["compiled to"]) &
-                            set(KM["source files"][context_file]["compiled to"])):
+                    if t_unit_is_common(decl_file, context_file):
                         matched_files[1].append(possible_file)
 
         matched_files[0].append("unknown")
@@ -757,10 +733,7 @@ def match_var_and_value(variables, viewed, var_name, file, origvar_name, origina
             KM["variables"][origvar_name][original_file]["values"][value] = 1
         elif value in variables:
             for possible_file in variables[value]:
-                if possible_file == file:
-                    match_var_and_value(variables, viewed, value, possible_file, origvar_name, original_file)
-                elif (list(set(KM["source files"][possible_file]["compiled to"]) &
-                           set(KM["source files"][file]["compiled to"]))):
+                if files_are_the_same(possible_file, file) or t_unit_is_common(possible_file, file):
                     match_var_and_value(variables, viewed, value, possible_file, origvar_name, original_file)
 
 
@@ -779,17 +752,9 @@ def process_use_var():
 
                 if var_name in KM["variables"]:
                     for possible_file in KM["variables"][var_name]:
-                        if possible_file == context_file:
-                            for func in KM["variables"][var_name][possible_file]["values"]:
-                                match_use_and_def(context_file, context_func, func, line)
-                        elif (list(set(KM["source files"][possible_file]["compiled to"]) &
-                                   set(KM["source files"][context_file]["compiled to"]))):
-                            for func in KM["variables"][var_name][possible_file]["values"]:
-                                match_use_and_def(context_file, context_func, func, line)
-                        elif ("used in" in KM["source files"][possible_file] and
-                                "used in" in KM["source files"][context_file] and
-                                list(set(KM["source files"][possible_file]["used in"]) &
-                                     set(KM["source files"][context_file]["used in"]))):
+                        if (files_are_the_same(possible_file, context_file) or
+                           t_unit_is_common(possible_file, context_file) or
+                           files_are_linked(possible_file, context_file)):
                             for func in KM["variables"][var_name][possible_file]["values"]:
                                 match_use_and_def(context_file, context_func, func, line)
 
@@ -831,15 +796,11 @@ def match_use_and_def(context_file, context_func, func, line):
             matched_files[x] = []
 
         for possible_file in possible_files:
-            if possible_file == context_file:
+            if files_are_the_same(possible_file, context_file):
                 matched_files[3].append(possible_file)
-            elif (list(set(KM["source files"][possible_file]["compiled to"]) &
-                       set(KM["source files"][context_file]["compiled to"]))):
+            elif t_unit_is_common(possible_file, context_file):
                 matched_files[2].append(possible_file)
-            elif ("used in" in KM["source files"][possible_file] and
-                    "used in" in KM["source files"][context_file] and
-                    list(set(KM["source files"][possible_file]["used in"]) &
-                         set(KM["source files"][context_file]["used in"]))):
+            elif files_are_linked(possible_file, context_file):
                 matched_files[1].append(possible_file)
 
         matched_files[0].append("unknown")
@@ -916,6 +877,29 @@ def k_error(str):
 
     with open(ERR_LOG, "a") as err_fh:
         err_fh.write("{}\n".format(str))
+
+def files_are_the_same(file1, file2):
+    if file1 == file2:
+        return True
+    return False
+
+def t_unit_is_common(file1, file2):
+    if file1 in KM["source files"] and file2 in KM["source files"]:
+        if list(set(KM["source files"][file1]["compiled to"]) & set(KM["source files"][file2]["compiled to"])):
+            return True
+    return False
+
+def files_are_linked(file1, file2):
+    if file1 in KM["source files"] and file2 in KM["source files"]:
+        if "used in" in KM["source files"][file1] and "used in" in KM["source files"][file2]:
+            if list(set(KM["source files"][file1]["used in"]) & set(KM["source files"][file2]["used in"])):
+                return True
+    return False
+
+def correlate(file1, file2):
+    if files_are_the_same(file1, file2) or t_unit_is_common(file1, file2) or files_are_linked(file1, file2):
+        return True
+    return False
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
