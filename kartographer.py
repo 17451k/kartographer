@@ -39,8 +39,9 @@ OF = WD + "/object_files.txt"  # Info about from compilation of .c files
 EXPORTED = WD + "/exported.txt"  # Info about exported functions (Linux kernel only)
 INIT = WD + "/init.txt"  # Info about module_init functions (Linux kernel only)
 EXIT = WD + "/exit.txt"  # Info about module_exit functions (Linux kernel only)
+ALIASES = WD + "/aliases.txt"  # Info about aliases
 
-FILES = [EXECUTION, CALL, DECL, CALLP, USE_FUNC, USE_VAR, INIT_GLOBAL, DEFINE, OF, EXPORTED, INIT, EXIT]
+FILES = [EXECUTION, CALL, DECL, CALLP, USE_FUNC, USE_VAR, INIT_GLOBAL, DEFINE, OF, EXPORTED, INIT, EXIT, ALIASES]
 
 # Log files
 CIF_ERR_LOG = WD + "/cif_err.log"  # Path to file containing CIF error log
@@ -97,6 +98,10 @@ def gen_info_requests():
             - path of the current source file ($path)
             - number of the line with macro definition ($line)
             - name of the macro ($macro_name)
+        - for each alias declaration:
+            - path of the current source file ($path)
+            - alias (arg_val1)
+            - name of the function (arg_val2)
 
     For the Linux kernel it will additionally do the following:
         - remove likely(x) and unlikely(x) macro functions from sources
@@ -167,6 +172,10 @@ def gen_info_requests():
 
         asp_fh.write("info: expand(module_exit(x)) {\n")
         asp_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$arg_val1>\n".format(EXIT))
+        asp_fh.write("}\n\n")
+
+        asp_fh.write("info: expand(weak_alias(arg1, arg2)) {\n")
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s %s\\n\",$path,$arg_val1,$arg_val2>\n".format(ALIASES))
         asp_fh.write("}\n\n")
 
         asp_fh.write("info: define($) {\n")
@@ -535,6 +544,22 @@ def process_exit():
 
                 KM["functions"][func][file]["exit"] = True
 
+def process_aliases():
+    # Only for os-core
+    if not os.path.isfile(ALIASES):
+        return
+
+    print("Processing aliases")
+
+    with open(ALIASES, "r") as aliases_fh:
+        for line in aliases_fh:
+            m = re.match(r'(\S*)\s*(\S*)\s*(\S*)', line)
+            if m:
+                path = m.group(1)
+                new = m.group(2)
+                old = m.group(3)
+
+                KM["aliases"][old][new] = path
 
 def process_call():
     if not os.path.isfile(CALL):
@@ -554,12 +579,50 @@ def process_call():
                 match_call_and_def(context_file, context_func, func, call_line, call_type)
 
 
+def match_alias_and_func(func, context_file, call_type):
+    if func in KM["aliases"]:
+        if func in KM["functions"]:
+            for possible_file in KM["functions"][func]:
+                if (possible_file == context_file or
+                        (list(set(KM["source files"][possible_file]["compiled to"]) &
+                              set(KM["source files"][context_file]["compiled to"]))) or
+                        ("used in" in KM["source files"][possible_file] and
+                         "used in" in KM["source files"][context_file] and
+                         list(set(KM["source files"][possible_file]["used in"]) &
+                              set(KM["source files"][context_file]["used in"])))):
+                    return func, call_type
+
+        for alias in KM["aliases"][func]:
+            if alias in KM["functions"]:
+                alias_file = KM["aliases"][func][alias]
+
+                if (alias_file == context_file or
+                        (list(set(KM["source files"][alias_file]["compiled to"]) &
+                              set(KM["source files"][context_file]["compiled to"]))) or
+                        ("used in" in KM["source files"][alias_file] and
+                         "used in" in KM["source files"][context_file] and
+                         list(set(KM["source files"][alias_file]["used in"]) &
+                              set(KM["source files"][context_file]["used in"])))):
+                    for possible_file in KM["functions"][alias]:
+                        if (possible_file == context_file or
+                                (list(set(KM["source files"][possible_file]["compiled to"]) &
+                                      set(KM["source files"][context_file]["compiled to"]))) or
+                                ("used in" in KM["source files"][possible_file] and
+                                 "used in" in KM["source files"][context_file] and
+                                 list(set(KM["source files"][possible_file]["used in"]) &
+                                      set(KM["source files"][context_file]["used in"])))):
+                            return alias, KM["functions"][alias][possible_file]["type"]
+
+    return func, call_type
+
 def match_call_and_def(context_file, context_func, func, call_line, call_type):
     # __builtin and __compiletime functions are not included in KM
     if re.match(r'(__builtin)|(__compiletime)', func):
         return
     if re.match(r'__bad', func) and func not in KM["functions"]:
         return
+
+    func, call_type = match_alias_and_func(func, context_file, call_type)
 
     if func not in KM["functions"]:
         KM["functions"][func]["unknown"]["defined on line"] = "unknown"
@@ -884,6 +947,7 @@ if __name__ == "__main__":
     process_define()
     process_init()
     process_exit()
+    process_aliases()
     process_decl()
 
     process_call()
