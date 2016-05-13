@@ -224,6 +224,8 @@ def process_build_commands(bc, cif, aspect):
 
             if command["type"] == "cc":
                 process_cc_command(command, src, cif, aspect)
+            if command["type"] == "asm":
+                process_asm_command(command, src)
             elif command["type"] == "ld":
                 process_ld_command(command, src)
 
@@ -340,6 +342,18 @@ def store_error_information(args, log):
         log_fh.write("CIF LOG: ")
         log_fh.writelines(log_str)
         log_fh.write("\n\n")
+
+def process_asm_command(command, src):
+    # Workarounds for bad asm commands
+    if command["in"] == []:
+        return
+    elif command["out"] is None:
+        return
+
+    rel_in = os.path.relpath(command["in"][0], start=src)
+    rel_out = os.path.relpath(command["out"], start=src)
+    KM["source files"][rel_in]["compiled to"][rel_out] = 1
+    KM["object files"][rel_out]["compiled from"][rel_in] = 1
 
 
 def process_ld_command(command, src):
