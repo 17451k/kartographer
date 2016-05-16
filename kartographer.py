@@ -343,6 +343,7 @@ def store_error_information(args, log):
         log_fh.writelines(log_str)
         log_fh.write("\n\n")
 
+
 def process_asm_command(command, src):
     # Workarounds for bad asm commands
     if command["in"] == []:
@@ -357,7 +358,7 @@ def process_asm_command(command, src):
 
 
 def process_ld_command(command, src):
-    if command["out"] == None:
+    if command["out"] is None:
         out = "unknown"
     else:
         out = command["out"]
@@ -558,6 +559,7 @@ def process_exit():
 
                 KM["functions"][func][file]["exit"] = True
 
+
 def process_aliases():
     # Only for os-core
     if not os.path.isfile(ALIASES):
@@ -574,6 +576,7 @@ def process_aliases():
                 old = m.group(3)
 
                 KM["aliases"][old][new] = path
+
 
 def process_call():
     if not os.path.isfile(CALL):
@@ -610,6 +613,7 @@ def match_alias_and_func(func, context_file, call_type):
                             return alias, KM["functions"][alias][possible_file]["type"]
 
     return func, call_type
+
 
 def match_call_and_def(context_file, context_func, func, call_line, call_type):
     # __builtin and __compiletime functions are not included in KM
@@ -892,10 +896,12 @@ def k_error(str):
     with open(ERR_LOG, "a") as err_fh:
         err_fh.write("{}\n".format(str))
 
+
 def files_are_the_same(file1, file2):
     if file1 == file2:
         return True
     return False
+
 
 def t_unit_is_common(file1, file2):
     if file1 in KM["source files"] and file2 in KM["source files"]:
@@ -903,12 +909,14 @@ def t_unit_is_common(file1, file2):
             return True
     return False
 
+
 def files_are_linked(file1, file2):
     if file1 in KM["source files"] and file2 in KM["source files"]:
         if "used in" in KM["source files"][file1] and "used in" in KM["source files"][file2]:
             if list(set(KM["source files"][file1]["used in"]) & set(KM["source files"][file2]["used in"])):
                 return True
     return False
+
 
 def correlate(file1, file2):
     if files_are_the_same(file1, file2) or t_unit_is_common(file1, file2) or files_are_linked(file1, file2):
