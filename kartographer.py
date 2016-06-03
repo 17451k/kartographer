@@ -35,7 +35,7 @@ USE_FUNC = WD + "/use_func.txt"  # Info about using function names in pointers (
 USE_VAR = WD + "/use_var.txt"  # Info about using global variables in function context
 INIT_GLOBAL = WD + "/init_global.txt"  # Info about init values of global variables
 DEFINE = WD + "/define.txt"  # Info about macro functions
-OF = WD + "/object_files.txt"  # Info about from compilation of .c files
+OF = WD + "/object_files.txt"  # Info about compilation of .c files
 EXPORTED = WD + "/exported.txt"  # Info about exported functions (Linux kernel only)
 INIT = WD + "/init.txt"  # Info about module_init functions (Linux kernel only)
 EXIT = WD + "/exit.txt"  # Info about module_exit functions (Linux kernel only)
@@ -179,6 +179,7 @@ def gen_info_requests():
         asp_fh.write("}\n\n")
 
         asp_fh.write("info: define($) {\n")
+        asp_fh.write("  $fprintf<\"{}\",\"%s %s\\n\",$path,$env<OBJ>>\n".format(OF))
         asp_fh.write("  $fprintf<\"{}\",\"%s %s %s\\n\",$path,$macro_name,$line>\n".format(DEFINE))
         asp_fh.write("}\n\n")
 
