@@ -288,7 +288,7 @@ def process_cc_command(command, src, cif, aspect):
 
     for opt in command["opts"]:
         # Aspectator is based on GCC 4.6 which doesn't support some options
-        if opt == "-Wno-maybfe-uninitialized":
+        if opt == "-Wno-maybe-uninitialized":
             continue
         elif opt == "--param=allow-store-data-races=0":
             continue
@@ -302,6 +302,12 @@ def process_cc_command(command, src, cif, aspect):
             continue
         elif re.match(r'-mcpu', opt):
             continue
+        elif re.match(r'-fasan', opt):
+            continue
+        elif opt == "--param": # --param asan-stack=1
+            continue
+        elif re.match(r'asan', opt):
+            continue
         elif opt == "-mthumb":
             continue
         elif opt == "-G0":
@@ -309,6 +315,8 @@ def process_cc_command(command, src, cif, aspect):
         elif opt == "-mips32":
             continue
         elif opt == "-mno-abicalls":
+            continue
+        elif opt == "-Wno-unused-const-variable":
             continue
 
         m = re.search(r'-I(.*)', opt)
@@ -351,6 +359,8 @@ def process_asm_command(command, src):
         return
     elif command["out"] is None:
         return
+
+    os.chdir(command["cwd"])
 
     rel_in = os.path.relpath(command["in"][0], start=src)
     rel_out = os.path.relpath(command["out"], start=src)
