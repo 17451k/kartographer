@@ -81,7 +81,7 @@ def create_stubs():
             cmd_fh.write("#!/usr/bin/python3\n")
             cmd_fh.write("import sys\n")
             cmd_fh.write("import common\n")
-            cmd_fh.write("common.process(sys.argv)\n")
+            cmd_fh.write("sys.exit(common.process(sys.argv))\n")
 
         st = os.stat(cmd)
         os.chmod(cmd, st.st_mode | stat.S_IEXEC)
@@ -104,20 +104,7 @@ def build_src(src, make):
     env.update({"PATH": "{0}:{1}".format(stubs, os.environ["PATH"])})
     os.chdir(src)
 
-    # proc = subprocess.Popen(["make", "clean"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    # (out, err) = proc.communicate()
-
-    # if err:
-    #     sys.exit("Something went wrong")
-
-
-    proc = subprocess.Popen(make, env=env)
-    (out, err) = proc.communicate()
-
-    # if err:
-    #     print(out.decode("utf-8"))
-    #     print(err.decode("utf-8"))
-    #     sys.exit("Something went wrong")
+    subprocess.call(make, env=env)
 
     remove_stubs(stubs)
     os.chdir(cwd)
