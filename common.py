@@ -37,11 +37,11 @@ def process(argv):
             cmd = "objcopy"
         cmd_fh.write('{}||{}\n'.format(os.getcwd(), "||".join([cmd] + opts)))
 
+    # Restore original cmd
+    cmd = os.path.basename(argv[0])
+
     # Eclude path where wrapper build command is located.
     os.environ["PATH"] = re.sub(r'^[^:]+:', '', os.environ["PATH"])
 
     # Execute original build command.
-    proc = subprocess.Popen([os.path.basename(argv[0])] + opts)
-    (out, err) = proc.communicate()
-
-    return proc.poll()
+    return subprocess.call([cmd] + opts)
