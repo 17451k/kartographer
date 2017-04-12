@@ -37,6 +37,7 @@ USAGE = """
                   -m  <macro name>    (e.g. mutex_lock)
                   -s  <source file>   (e.g. sound/sound_core.c)
                   -o  <object file>   (e.g. sound/sound_core.o)
+                  -t  <funciton name>  <funciton name>   (e.g. do_sys_open inode_permission)
 
 """
 
@@ -47,7 +48,10 @@ def nested_dict():
 KM = nested_dict()
 
 
-def KM_dump(mode, name):
+def KM_dump(command):
+    mode = command[0]
+    name = command[1]
+
     if re.search(r'-f', mode):
         if name not in KM["functions"]:
             print("Function {} is not found in KM".format(colored(name, func_color)))
@@ -205,6 +209,66 @@ def KM_dump(mode, name):
                 print("  is linked to:")
                 for obj in KM["object files"][name]["linked to"]:
                     print("    {}".format(colored(obj, object_color)))
+    elif re.search(r'-t', mode):
+        # We are going to find call traces from the HEAD function to the TAIL function
+        head = name
+        tail = command[2]
+
+        if head not in KM["functions"]:
+            print("Function {} is not found in KM".format(colored(head, func_color)))
+        elif tail not in KM["functions"]:
+            print("Function {} is not found in KM".format(colored(tail, func_color)))
+        else:
+            find_traces(head, tail)
+
+
+def find_traces(head, tail):
+    for tail_file in KM["functions"][tail]:
+        traces = nested_dict()
+
+        queue = []
+        visited = nested_dict()
+
+        queue.append([tail, tail_file])
+
+        while len(queue) > 0:
+            (func, file) = queue.pop(0)
+
+            visited[func][file] = 1
+
+            if "called in" in KM["functions"][func][file]:
+                for caller in KM["functions"][func][file]["called in"]:
+                    for caller_file in KM["functions"][func][file]["called in"][caller]:
+                        traces[caller][caller_file][func][file] = 1
+
+                        if (caller is not head) and (caller not in visited or caller_file not in visited[caller]):
+                            queue.append([caller, caller_file])
+
+        dump_trace(traces, head, tail)
+
+
+def dump_trace(traces, head, tail):
+    for head_file in traces[head]:
+        visited = nested_dict()
+        printed_traces = nested_dict()
+
+        dump_trace_recursive(traces, visited, printed_traces, head, head_file, tail)
+
+
+def dump_trace_recursive(traces, visited, printed_traces, func, file, tail):
+    if func in visited and file in visited[func]:
+        return
+
+    visited[func][file] = 1
+
+    for trace_func in traces[func][file]:
+        for trace_file in traces[func][file][trace_func]:
+            if func not in printed_traces or trace_func not in printed_traces[func]:
+                print("{} -> {}".format(colored(func, func_color), colored(trace_func, func_color)))
+                printed_traces[func][trace_func] = 1
+
+            if trace_func is not tail:
+                dump_trace_recursive(traces, visited, printed_traces, trace_func, trace_file, tail)
 
 
 if __name__ == "__main__":
@@ -218,7 +282,10 @@ if __name__ == "__main__":
     while 1:
         command = input("KM: ").split(" ")
 
-        if len(command) < 2 or not re.search(r'-f|-m|-s|-o', command[0]):
+        if len(command) < 2 or not re.search(r'-f|-m|-s|-o|-t', command[0]):
+            print("Wrong arguments")
+            continue
+        elif len(command) < 3 and re.search(r'-t', command[0]):
             print("Wrong arguments")
             continue
         elif km_status == "not loaded":
@@ -229,5 +296,5 @@ if __name__ == "__main__":
                 except json.decoder.JSONDecodeError as e:
                     sys.exit("Specified file is not a valid JSON")
 
-        KM_dump(command[0], command[1])
+        KM_dump(command)
         print()
