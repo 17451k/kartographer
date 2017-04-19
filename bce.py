@@ -329,6 +329,9 @@ if __name__ == "__main__":
     else:
         make = options.make.split()
 
+    if os.path.isfile(raw_cmds):
+        os.remove(raw_cmds)
+
     src = check_src(options.sources)
     build_src(src, make)
 
