@@ -17,6 +17,7 @@
 #
 
 import argparse
+import errno
 import json
 import multiprocessing
 import os
@@ -93,10 +94,12 @@ def remove_stubs(stubs):
     os.chdir(stubs)
 
     for cmd in commands:
-        os.remove(cmd)
+        silentremove(cmd)
 
 
 def build_src(src, make):
+    silentremove(raw_cmds)
+
     env = dict(os.environ)
     env.update({"RAW_CMDS": raw_cmds})
 
@@ -315,10 +318,19 @@ def dump_cmds():
         json.dump(final_cmds, cmd_fh, sort_keys=True, indent=4)
 
 
+def silentremove(filename):
+    try:
+        os.remove(filename)
+    except OSError as e:
+        if e.errno != errno.ENOENT:  # errno.ENOENT = no such file or directory
+            raise  # re-raise exception if a different error occurred
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--sources", metavar="PATH", help="set PATH to sources", required=True)
     parser.add_argument("--make", metavar="COMMAND", help="replace default 'make' command by COMMAND", required=False)
+    parser.add_argument("--keep", help="keep {} file".format(os.path.basename(raw_cmds)), required=False, action="store_true")
     options = parser.parse_args()
 
     if not options.sources:
@@ -329,14 +341,14 @@ if __name__ == "__main__":
     else:
         make = options.make.split()
 
-    if os.path.isfile(raw_cmds):
-        os.remove(raw_cmds)
-
     src = check_src(options.sources)
     build_src(src, make)
 
     process_raw_cmds(src)
     generate_final_cmds()
     dump_cmds()
+
+    if not options.keep:
+        silentremove(raw_cmds)
 
     print("Complete")
