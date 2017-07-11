@@ -45,7 +45,7 @@ final_cmds = dict()
 cfg = dict()
 
 
-def check_arguments(args):
+def check_arguments():
     if not os.path.exists(common):
         sys.exit("Crucial part of this script - file common.py - does not exist")
 
@@ -58,6 +58,14 @@ def check_arguments(args):
     for path in args.stubs:
         if not os.path.exists(path):
             sys.exit("The paths specified in --stubs argument do not exist")
+
+    args.sources = os.path.abspath(args.sources)
+
+    args.stubs = [os.path.abspath(stub) for stub in args.stubs]
+    args.stubs = list(set(args.stubs))
+    if realdir in args.stubs:
+        args.stubs.remove(realdir)
+    args.stubs.insert(0, realdir)
 
 
 def parse_config():
@@ -112,26 +120,25 @@ def remove_stubs(stubs):
             shutil.rmtree("__pycache__")
 
 
-def build_src(src):
-    stubs = [os.path.abspath(stub) for stub in args.stubs]
+def build_src():
     silentremove(raw_cmds)
 
     env = dict(os.environ)
     env.update({"RAW_CMDS": raw_cmds})
+    env.update({"PATH": "{0}:{1}".format(args.stubs[0], os.environ["PATH"])})
 
-    create_stubs(stubs)
-    env.update({"PATH": "{0}:{1}".format(stubs[0], os.environ["PATH"])})
-    os.chdir(src)
+    create_stubs(args.stubs)
 
+    os.chdir(args.sources)
     subprocess.call(args.make.split(), env=env)
-
-    remove_stubs(stubs)
     os.chdir(cwd)
 
+    remove_stubs(args.stubs)
 
-def process_raw_cmds(src):
+
+def process_raw_cmds():
     cmds["build commands"] = []
-    cmds["src"] = src
+    cmds["src"] = args.sources
 
     with open(raw_cmds, "r") as cmd_fh:
         for line in cmd_fh:
@@ -355,18 +362,15 @@ if __name__ == "__main__":
     parser.add_argument("--stubs", metavar="PATHs", help="list of PATHs where stubs will be stored", required=False, nargs='+', default=[])
     args = parser.parse_args()
 
-    check_arguments(args)
+    check_arguments()
     parse_config()
-
-    src = os.path.abspath(args.sources)
-    args.stubs.insert(0, realdir)
 
     signal.signal(signal.SIGINT, handler)
 
-    build_src(src)
+    build_src()
 
     if os.path.exists(raw_cmds):
-        process_raw_cmds(src)
+        process_raw_cmds()
         generate_final_cmds()
         dump_cmds()
 
