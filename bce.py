@@ -23,6 +23,7 @@ import multiprocessing
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -38,6 +39,7 @@ config = realdir + "/config.json"
 raw_cmds = cwd + "/raw_cmds.txt"
 json_cmds = cwd + "/cmds.json"
 
+args = dict()
 cmds = dict()
 final_cmds = dict()
 cfg = dict()
@@ -110,8 +112,8 @@ def remove_stubs(stubs):
             shutil.rmtree("__pycache__")
 
 
-def build_src(src, make, stubs):
-    stubs = [os.path.abspath(stub) for stub in stubs]
+def build_src(src):
+    stubs = [os.path.abspath(stub) for stub in args.stubs]
     silentremove(raw_cmds)
 
     env = dict(os.environ)
@@ -121,7 +123,7 @@ def build_src(src, make, stubs):
     env.update({"PATH": "{0}:{1}".format(stubs[0], os.environ["PATH"])})
     os.chdir(src)
 
-    subprocess.call(make.split(), env=env)
+    subprocess.call(args.make.split(), env=env)
 
     remove_stubs(stubs)
     os.chdir(cwd)
@@ -340,6 +342,12 @@ def silentremove(filename):
             raise  # re-raise exception if a different error occurred
 
 
+def handler(signum, frame):
+    print('Signal handler called with signal', signum)
+
+    remove_stubs(args.stubs)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--sources", metavar="PATH", help="set PATH to sources", required=True)
@@ -354,7 +362,9 @@ if __name__ == "__main__":
     src = os.path.abspath(args.sources)
     args.stubs.insert(0, realdir)
 
-    build_src(src, args.make, args.stubs)
+    signal.signal(signal.SIGINT, handler)
+
+    build_src(src)
 
     if os.path.exists(raw_cmds):
         process_raw_cmds(src)
