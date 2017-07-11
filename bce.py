@@ -343,9 +343,8 @@ def silentremove(filename):
 
 
 def handler(signum, frame):
-    print('Signal handler called with signal', signum)
-
     remove_stubs(args.stubs)
+    sys.exit('Signal handler called with signal ' + str(signum))
 
 
 if __name__ == "__main__":
