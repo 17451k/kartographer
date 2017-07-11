@@ -44,4 +44,9 @@ def process(argv):
     os.environ["PATH"] = re.sub(r'^[^:]+:', '', os.environ["PATH"])
 
     # Execute original build command.
-    return subprocess.call([cmd] + opts)
+    try:
+        return subprocess.check_call([cmd + ".bce"] + opts)
+    except subprocess.CalledProcessError:
+        return 1
+    except OSError:  # executable not found
+        return subprocess.call([cmd] + opts)

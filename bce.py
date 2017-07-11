@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2016 ISPRAS (http://www.ispras.ru)
+# Copyright (c) 2017 ISPRAS (http://www.ispras.ru)
 # Institute for System Programming of the Russian Academy of Sciences
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,6 +22,7 @@ import json
 import multiprocessing
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -29,85 +30,98 @@ import sys
 # For parallel build
 processes = multiprocessing.cpu_count()
 
+realdir = os.path.dirname(os.path.realpath(__file__))
 cwd = os.getcwd()
-cmds = dict()
-final_cmds = dict()
+
+common = realdir + "/common.py"
+config = realdir + "/config.json"
 raw_cmds = cwd + "/raw_cmds.txt"
 json_cmds = cwd + "/cmds.json"
 
-ar = ["ar", "arm-none-eabi-ar", "mipsel-linux-gnu-ar"]
-gcc = ["gcc", "arm-none-eabi-gcc", "mipsel-linux-gnu-gcc"]
-ld = ["ld", "arm-none-eabi-ld", "mipsel-linux-gnu-ld"]
-objcopy = ["objcopy", "arm-none-eabi-objcopy", "mipsel-linux-gnu-objcopy"]
-mv = ["mv"]
-
-commands = ar + gcc + ld + objcopy + mv
+cmds = dict()
+final_cmds = dict()
+cfg = dict()
 
 
-opts_info = {
-    "cc": {"require values": ("-D", "-I", "-O", "-include", "-isystem", "-mcmodel", "-o",
-                              "-print-file-name", "-x", "-MT", "-MF", "asan-stack",
-                              "asan-globals", "asan-instrumentation-with-call-threshold"),
-           "do not require in": ("-print-file-name"),
-           "do not require out": ("-E", "-print-file-name"),
-           "do not require in, out and values": ("-v", "-V", "-qversion", "--version", "-print-prog-name=ld", "-print-search-dirs", "-print-multi-os-directory", "-Wl,--build-id", "-Wl,--hash-style=sysv")},
-    "ld": {"require values": ("-T", "-m", "-o"),
-           "do not require in": (),
-           "do not require out": (),
-           "do not require in, out and values": ("-v", "--help", "--version", "-V")}}
+def check_arguments(args):
+    if not os.path.exists(common):
+        sys.exit("Crucial part of this script - file common.py - does not exist")
+
+    if not os.path.exists(config):
+        sys.exit("Crucial part of this script - file config.json - does not exist")
+
+    if not os.path.exists(args.sources):
+        sys.exit("Path to sources does not exist")
+
+    for path in args.stubs:
+        if not os.path.exists(path):
+            sys.exit("The paths specified in --stubs argument do not exist")
 
 
-def check_src(src):
-    if not os.path.exists(src):
-        sys.exit("Sources are not found")
+def parse_config():
+    global cfg
 
-    for dirpath, dirnames, filenames in os.walk(src):
-        for filename in filenames:
-            if filename == "Makefile":
-                is_makefile_found = True
-                break
-
-    if not is_makefile_found:
-        sys.exit("Kernel is not found")
-
-    return os.path.abspath(src)
+    with open(config, "r") as config_fh:
+        cfg = json.load(config_fh)
 
 
-def create_stubs():
-    stubs = os.path.dirname(os.path.realpath(__file__))
-    os.chdir(stubs)
+def create_stubs(stubs):
+    for path in stubs:
+        os.chdir(path)
 
-    for cmd in commands:
-        with open(cmd, "w") as cmd_fh:
+        if path is not stubs[0]:
+            shutil.copy(common, ".")
+
+        for cmd in cfg["stubs"]:
+            if os.path.exists(cmd):
+                os.rename(cmd, cmd + ".bce")
+
+            create_stub(cmd)
+
+
+def create_stub(stub):
+    with open(stub, "w") as cmd_fh:
+        if sys.platform == "linux":
             cmd_fh.write("#!/usr/bin/python3\n")
-            cmd_fh.write("import sys\n")
-            cmd_fh.write("import common\n")
-            cmd_fh.write("sys.exit(common.process(sys.argv))\n")
+        elif sys.platform == "darwin":
+            cmd_fh.write("#!/usr/local/bin/python3\n")
+        cmd_fh.write("import sys\n")
+        cmd_fh.write("import common\n")
+        cmd_fh.write("sys.exit(common.process(sys.argv))\n")
 
-        st = os.stat(cmd)
-        os.chmod(cmd, st.st_mode | stat.S_IEXEC)
-
-    return stubs
+    st = os.stat(stub)
+    os.chmod(stub, st.st_mode | stat.S_IEXEC)
 
 
 def remove_stubs(stubs):
-    os.chdir(stubs)
+    for path in stubs:
+        os.chdir(path)
 
-    for cmd in commands:
-        silentremove(cmd)
+        for cmd in cfg["stubs"]:
+            silentremove(cmd)
+
+            if os.path.exists(cmd + ".bce"):
+                os.rename(cmd + ".bce", cmd)
+
+        if path is not stubs[0]:
+            silentremove("common.py")
+
+        if os.path.exists("__pycache__"):
+            shutil.rmtree("__pycache__")
 
 
-def build_src(src, make):
+def build_src(src, make, stubs):
+    stubs = [os.path.abspath(stub) for stub in stubs]
     silentremove(raw_cmds)
 
     env = dict(os.environ)
     env.update({"RAW_CMDS": raw_cmds})
 
-    stubs = create_stubs()
-    env.update({"PATH": "{0}:{1}".format(stubs, os.environ["PATH"])})
+    create_stubs(stubs)
+    env.update({"PATH": "{0}:{1}".format(stubs[0], os.environ["PATH"])})
     os.chdir(src)
 
-    subprocess.call(make, env=env)
+    subprocess.call(make.split(), env=env)
 
     remove_stubs(stubs)
     os.chdir(cwd)
@@ -133,7 +147,7 @@ def process_raw_cmds(src):
             out_file_is_required = True
 
             if cmd["type"] in ("cc", "ld"):
-                opts_requiring_vals = opts_info[cmd["type"]]["require values"]
+                opts_requiring_vals = cfg["opts_info"][cmd["type"]]["require values"]
                 skip_next_opt = False
 
                 if len(opts) == 0:
@@ -145,17 +159,17 @@ def process_raw_cmds(src):
                         skip_next_opt = False
                         continue
 
-                    if opt in opts_info[cmd["type"]]["do not require in, out and values"]:
+                    if opt in cfg["opts_info"][cmd["type"]]["do not require in, out and values"]:
                         in_files_are_required = False
                         out_file_is_required = False
                         cmd["opts"].append(opt)
                         continue
 
-                    for does_not_requre_in in opts_info[cmd["type"]]["do not require in"]:
+                    for does_not_requre_in in cfg["opts_info"][cmd["type"]]["do not require in"]:
                         if re.search(r"^-{}".format(does_not_requre_in), opt):
                             in_files_are_required = False
 
-                    for does_not_requre_out in opts_info[cmd["type"]]["do not require out"]:
+                    for does_not_requre_out in cfg["opts_info"][cmd["type"]]["do not require out"]:
                         if re.search(r"^-{}".format(does_not_requre_out), opt):
                             out_file_is_required = False
 
@@ -329,26 +343,27 @@ def silentremove(filename):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--sources", metavar="PATH", help="set PATH to sources", required=True)
-    parser.add_argument("--make", metavar="COMMAND", help="replace default 'make' command by COMMAND", required=False)
+    parser.add_argument("--make", metavar="COMMAND", help="replace default 'make' command by COMMAND", required=False, default="make -j" + str(processes))
     parser.add_argument("--keep", help="keep {} file".format(os.path.basename(raw_cmds)), required=False, action="store_true")
-    options = parser.parse_args()
+    parser.add_argument("--stubs", metavar="PATHs", help="list of PATHs where stubs will be stored", required=False, nargs='+', default=[])
+    args = parser.parse_args()
 
-    if not options.sources:
-        sys.exit("Sources are not found. Please use --souces parameter to specify path to them")
+    check_arguments(args)
+    parse_config()
 
-    if not options.make:
-        make = ["make", "-j" + str(processes)]
+    src = os.path.abspath(args.sources)
+    args.stubs.insert(0, realdir)
+
+    build_src(src, args.make, args.stubs)
+
+    if os.path.exists(raw_cmds):
+        process_raw_cmds(src)
+        generate_final_cmds()
+        dump_cmds()
+
+        if not args.keep:
+            silentremove(raw_cmds)
+
+        print("Complete")
     else:
-        make = options.make.split()
-
-    src = check_src(options.sources)
-    build_src(src, make)
-
-    process_raw_cmds(src)
-    generate_final_cmds()
-    dump_cmds()
-
-    if not options.keep:
-        silentremove(raw_cmds)
-
-    print("Complete")
+        sys.exit("Something went wrong - build commands were not extracted")

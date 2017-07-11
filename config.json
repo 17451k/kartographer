@@ -1,0 +1,68 @@
+{
+    "opts_info": {
+        "cc": {
+            "do not require in": "-print-file-name",
+            "do not require in, out and values": [
+                "-v",
+                "-V",
+                "-qversion",
+                "--version",
+                "-print-prog-name=ld",
+                "-print-search-dirs",
+                "-print-multi-os-directory",
+                "-Wl,--build-id",
+                "-Wl,--hash-style=sysv"
+            ],
+            "do not require out": [
+                "-E",
+                "-print-file-name"
+            ],
+            "require values": [
+                "-D",
+                "-I",
+                "-O",
+                "-include",
+                "-isystem",
+                "-mcmodel",
+                "-o",
+                "-print-file-name",
+                "-x",
+                "-MT",
+                "-MF",
+                "asan-stack",
+                "asan-globals",
+                "asan-instrumentation-with-call-threshold"
+            ]
+        },
+        "ld": {
+            "do not require in": [],
+            "do not require in, out and values": [
+                "-v",
+                "--help",
+                "--version",
+                "-V"
+            ],
+            "do not require out": [],
+            "require values": [
+                "-T",
+                "-m",
+                "-o"
+            ]
+        }
+    },
+    "stubs": [
+        "ar",
+        "arm-none-eabi-ar",
+        "mipsel-linux-gnu-ar",
+        "gcc",
+        "arm-none-eabi-gcc",
+        "mipsel-linux-gnu-gcc",
+        "ld",
+        "arm-none-eabi-ld",
+        "mipsel-linux-gnu-ld",
+        "objcopy",
+        "arm-none-eabi-objcopy",
+        "mipsel-linux-gnu-objcopy",
+        "mv"
+    ]
+}
