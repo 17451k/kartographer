@@ -45,7 +45,7 @@ def process(argv):
 
     # Execute original build command.
     try:
-        return subprocess.check_call([cmd + ".bce"] + opts)
+        return subprocess.check_call([argv[0] + ".bce"] + opts)
     except subprocess.CalledProcessError:
         return 1
     except OSError:  # executable not found
